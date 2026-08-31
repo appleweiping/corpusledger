@@ -122,3 +122,13 @@ def scan_records(
     for record_id, data in records:
         _scan(data, "", record_id, config, findings)
     return sorted(findings, key=lambda item: (str(item["record_id"]), str(item["path"]), str(item["kind"])))
+
+
+def scan_record(
+    record_id: str,
+    data: dict[str, Any],
+    config: PrivacyConfig | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """Scan one record, allowing callers to discard its content immediately."""
+
+    return tuple(scan_records(((record_id, data),), config))

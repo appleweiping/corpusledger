@@ -3,15 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from .canonical import CanonicalPolicy
 from .diff import compare
-from .errors import CorpusLedgerError, InputError, ManifestError
+from .errors import (
+    CorpusLedgerError,
+    InputError,
+    ManifestError,
+    SignatureError,
+    SignatureVerificationError,
+)
 from .manifest import Manifest, build_manifest
 from .privacy import PrivacyConfig
+from .readers import ReaderAdapter, load_reader_adapter
 from .reporting import render
+from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -19,7 +28,7 @@ def _parser() -> argparse.ArgumentParser:
         prog="corpusledger",
         description="Reproducible manifests and diffs for JSON NLP corpora",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.1.0")
+    parser.add_argument("--version", action="version", version="%(prog)s 0.2.0")
     subparsers = parser.add_subparsers(dest="command", required=True)
     snapshot = subparsers.add_parser("snapshot", help="create a corpus manifest")
     snapshot.add_argument("input")
@@ -27,6 +36,10 @@ def _parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--id-field", default="id")
     snapshot.add_argument("--algorithm", choices=("sha256", "blake2b"), default="sha256")
     snapshot.add_argument("--sort-lists", action="store_true", help="treat lists as set-like (use with care)")
+    snapshot.add_argument(
+        "--reader",
+        help="explicit corpusledger.readers entry point (third-party code is loaded only when named)",
+    )
 
     difference = subparsers.add_parser("diff", help="compare two manifests")
     difference.add_argument("before")
@@ -37,6 +50,24 @@ def _parser() -> argparse.ArgumentParser:
     verify = subparsers.add_parser("verify", help="rebuild and verify a manifest")
     verify.add_argument("manifest")
     verify.add_argument("--input", help="override the source path recorded in the manifest")
+    verify.add_argument("--reader", help="override or confirm the recorded reader entry point")
+
+    sign = subparsers.add_parser("sign", help="create a detached Ed25519 signature")
+    sign.add_argument("manifest")
+    sign.add_argument("--private-key", required=True, help="Ed25519 PEM private key path")
+    sign.add_argument("--output", help="signature path (default: MANIFEST.sig)")
+    sign.add_argument(
+        "--password-env",
+        help="environment variable containing the PEM password; the value is never printed",
+    )
+
+    verify_signature = subparsers.add_parser(
+        "verify-signature",
+        help="authenticate exact manifest bytes against a trusted Ed25519 public key",
+    )
+    verify_signature.add_argument("manifest")
+    verify_signature.add_argument("signature")
+    verify_signature.add_argument("--public-key", required=True, help="trusted Ed25519 PEM public key path")
     return parser
 
 
@@ -56,8 +87,11 @@ def run(argv: list[str] | None = None) -> int:
     if args.command == "snapshot":
         input_path = Path(args.input).resolve()
         output_path = Path(args.output).resolve()
-        if input_path == output_path:
-            raise InputError("snapshot output must not overwrite the input corpus file")
+        _require_distinct(
+            output_path,
+            input_path,
+            message="snapshot output must not overwrite the input corpus file",
+        )
         if output_path.exists():
             try:
                 Manifest.load(output_path)
@@ -70,6 +104,7 @@ def run(argv: list[str] | None = None) -> int:
             algorithm=args.algorithm,
             policy=policy,
             exclude_paths=(output_path,),
+            reader=_reader(args.reader),
         )
         manifest.save(args.output)
         print(f"wrote {len(manifest.records)} records to {args.output}")
@@ -77,20 +112,62 @@ def run(argv: list[str] | None = None) -> int:
     if args.command == "diff":
         if args.output:
             output_path = Path(args.output).resolve()
-            inputs = {Path(args.before).resolve(), Path(args.after).resolve()}
-            if output_path in inputs:
-                raise InputError("diff output must not overwrite an input manifest")
+            _require_distinct(
+                output_path,
+                Path(args.before).resolve(),
+                Path(args.after).resolve(),
+                message="diff output must not overwrite an input manifest",
+            )
         result = compare(Manifest.load(args.before), Manifest.load(args.after))
         _write_report(render(result, args.format), args.output)
         return 1 if result.has_changes else 0
+    if args.command == "sign":
+        manifest_path = Path(args.manifest).resolve()
+        private_key_path = Path(args.private_key).resolve()
+        output_path = Path(args.output or f"{args.manifest}.sig").resolve()
+        _require_distinct(
+            output_path,
+            manifest_path,
+            private_key_path,
+            message="signature output must not overwrite the manifest or private key",
+        )
+        Manifest.load(manifest_path)
+        if output_path.exists():
+            try:
+                SignatureEnvelope.load(output_path)
+            except SignatureError as exc:
+                raise InputError(
+                    "signature output already exists and is not a CorpusLedger signature envelope"
+                ) from exc
+        password = _password_from_environment(args.password_env)
+        envelope = sign_manifest(manifest_path, private_key_path, password=password)
+        envelope.save(output_path)
+        print(f"signed manifest with key {envelope.key_id}; wrote {output_path}")
+        return 0
+    if args.command == "verify-signature":
+        manifest_path = Path(args.manifest).resolve()
+        signature_path = Path(args.signature).resolve()
+        public_key_path = Path(args.public_key).resolve()
+        Manifest.load(manifest_path)
+        try:
+            envelope = verify_manifest_signature(manifest_path, signature_path, public_key_path)
+        except SignatureVerificationError as exc:
+            print(f"signature verification failed: {exc}", file=sys.stderr)
+            return 1
+        print(f"verified Ed25519 signature from key {envelope.key_id}")
+        return 0
     existing = Manifest.load(args.manifest)
     source = args.input or existing.source
-    if Path(source).resolve() == Path(args.manifest).resolve():
-        raise InputError("verification source must not be the manifest itself")
+    _require_distinct(
+        Path(source).resolve(),
+        Path(args.manifest).resolve(),
+        message="verification source must not be the manifest itself",
+    )
     algorithm = existing.hash_metadata["algorithm"]
     policy_data = existing.hash_metadata["policy"]
     policy = CanonicalPolicy(**policy_data)
     privacy = PrivacyConfig.from_dict(existing.privacy_metadata["config"])
+    reader = _verification_reader(existing, args.reader)
     rebuilt = build_manifest(
         source,
         id_field=existing.id_field,
@@ -98,6 +175,7 @@ def run(argv: list[str] | None = None) -> int:
         policy=policy,
         privacy=privacy,
         exclude_paths=(args.manifest,),
+        reader=reader,
     )
     mismatches = _manifest_mismatches(existing, rebuilt)
     if not mismatches:
@@ -120,8 +198,61 @@ def _manifest_mismatches(existing: Manifest, rebuilt: Manifest) -> list[str]:
         "records",
         "schema",
         "privacy_findings",
+        "reader_metadata",
     )
     return [name for name in fields if getattr(existing, name) != getattr(rebuilt, name)]
+
+
+def _reader(name: str | None) -> ReaderAdapter | None:
+    return load_reader_adapter(name) if name is not None else None
+
+
+def _verification_reader(manifest: Manifest, requested: str | None) -> ReaderAdapter | None:
+    recorded = manifest.reader_metadata
+    if recorded is None:
+        if requested is not None:
+            raise InputError("manifest does not record a third-party reader adapter")
+        return None
+    if requested is not None and requested != recorded["name"]:
+        raise InputError(f"manifest requires reader {recorded['name']!r}, not requested reader {requested!r}")
+    reader = load_reader_adapter(recorded["name"])
+    if reader.version != recorded["version"]:
+        raise InputError(
+            f"manifest requires reader {reader.name!r} version {recorded['version']!r}; "
+            f"installed version is {reader.version!r}"
+        )
+    return reader
+
+
+def _require_distinct(destination: Path, *protected: Path, message: str) -> None:
+    for existing in protected:
+        if destination == existing:
+            raise InputError(message)
+        try:
+            aliases_existing_file = destination.exists() and existing.exists() and destination.samefile(existing)
+        except OSError:
+            aliases_existing_file = False
+        if aliases_existing_file:
+            raise InputError(message)
+
+
+def _password_from_environment(name: str | None) -> bytes | None:
+    if name is None:
+        return None
+    if (
+        not name
+        or name != name.strip()
+        or "=" in name
+        or any(ord(character) < 32 or ord(character) == 127 or 0xD800 <= ord(character) <= 0xDFFF for character in name)
+    ):
+        raise InputError("password environment variable name is invalid")
+    value = os.environ.get(name)
+    if value is None:
+        raise InputError(f"password environment variable {name!r} is not set")
+    try:
+        return value.encode("utf-8")
+    except UnicodeError as exc:
+        raise InputError(f"password environment variable {name!r} is not valid UTF-8 text") from exc
 
 
 def main() -> None:

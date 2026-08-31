@@ -80,16 +80,34 @@ def _walk(value: Any, path: str, fields: dict[str, FieldSummary]) -> None:
             _walk(value[key], child, fields)
 
 
+@dataclass
+class SchemaAccumulator:
+    """Incrementally collect the observed schema without retaining records."""
+
+    record_count: int = 0
+    fields: dict[str, FieldSummary] = field(default_factory=dict)
+
+    def observe(self, record: dict[str, Any]) -> None:
+        """Add one normalized JSON object."""
+
+        self.record_count += 1
+        _walk(record, "", self.fields)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the same format produced by :func:`infer_schema`."""
+
+        return {
+            "record_count": self.record_count,
+            "fields": {path: self.fields[path].to_dict(self.record_count) for path in sorted(self.fields)},
+        }
+
+
 def infer_schema(records: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Infer field presence and observed types across records."""
-    materialized = list(records)
-    fields: dict[str, FieldSummary] = {}
-    for record in materialized:
-        _walk(record, "", fields)
-    return {
-        "record_count": len(materialized),
-        "fields": {path: fields[path].to_dict(len(materialized)) for path in sorted(fields)},
-    }
+    accumulator = SchemaAccumulator()
+    for record in records:
+        accumulator.observe(record)
+    return accumulator.to_dict()
 
 
 def schema_drift(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:

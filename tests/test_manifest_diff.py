@@ -171,3 +171,30 @@ def test_manifest_load_wraps_strict_structure_errors(tmp_path: Path) -> None:
         Manifest.load(path)
     with pytest.raises(ManifestError, match="cannot save"):
         build_manifest(source).save(tmp_path)
+
+
+def test_reader_metadata_and_numeric_manifest_boundaries_are_strict(tmp_path: Path) -> None:
+    source = tmp_path / "data.jsonl"
+    corpus(source, [{"id": "1"}])
+    baseline = build_manifest(source).to_dict()
+    path = tmp_path / "invalid.manifest.json"
+
+    baseline["reader_metadata"] = {"name": "plugin", "version": "1\n"}
+    path.write_text(json.dumps(baseline), encoding="utf-8")
+    with pytest.raises(ManifestError, match="control characters"):
+        Manifest.load(path)
+
+    path.write_text('{"format":"corpusledger/1","future":1e400}', encoding="utf-8")
+    with pytest.raises(ManifestError, match="finite binary64"):
+        Manifest.load(path)
+
+
+def test_markdown_escapes_untrusted_manifest_identifiers(tmp_path: Path) -> None:
+    source = tmp_path / "data.jsonl"
+    corpus(source, [{"id": "safe"}])
+    before = build_manifest(source)
+    hostile = "bad`\n## injected"
+    corpus(source, [{"id": "safe"}, {"id": hostile}])
+    markdown = render_markdown(compare(before, build_manifest(source)))
+    assert "`bad`\n## injected`" not in markdown
+    assert "bad&#96;<br>## injected" in markdown

@@ -58,6 +58,8 @@ def compare(before: Manifest, after: Manifest) -> CorpusDiff:
         raise ManifestError("cannot diff manifests produced with different hash or canonicalization settings")
     if before.privacy_metadata != after.privacy_metadata:
         raise ManifestError("cannot diff manifests produced with different privacy settings")
+    if before.reader_metadata != after.reader_metadata:
+        raise ManifestError("cannot diff manifests produced with different reader adapters")
     old, new = _entry_map(before), _entry_map(after)
     old_ids, new_ids = set(old), set(new)
     changed: dict[str, dict[str, Any]] = {}

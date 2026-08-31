@@ -8,9 +8,11 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from .errors import CanonicalizationError
+from .strictjson import MAX_INTEGER_DIGITS
 
 CANONICAL_VERSION = "1"
 ListStrategy = Literal["preserve", "sort"]
+_INTEGER_LIMIT = 10**MAX_INTEGER_DIGITS
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,25 @@ class CanonicalPolicy:
         }
 
 
-def _normalize_string(value: str, policy: CanonicalPolicy) -> str:
+def _normalize_string(value: str, policy: CanonicalPolicy, *, path: str) -> str:
+    scalars: list[str] = []
+    index = 0
+    while index < len(value):
+        code_point = ord(value[index])
+        if 0xD800 <= code_point <= 0xDBFF:
+            if index + 1 >= len(value):
+                raise CanonicalizationError(f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value")
+            low = ord(value[index + 1])
+            if not 0xDC00 <= low <= 0xDFFF:
+                raise CanonicalizationError(f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value")
+            scalars.append(chr(0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00)))
+            index += 2
+            continue
+        if 0xDC00 <= code_point <= 0xDFFF:
+            raise CanonicalizationError(f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value")
+        scalars.append(value[index])
+        index += 1
+    value = "".join(scalars)
     if policy.unicode_form == "none":
         return value
     return unicodedata.normalize(policy.unicode_form, value)
@@ -52,10 +72,14 @@ def canonicalize(value: Any, policy: CanonicalPolicy | None = None, *, path: str
     numbers, tuples, dates, decimals, and arbitrary Python objects are rejected.
     """
     policy = policy or CanonicalPolicy()
-    if value is None or isinstance(value, (bool, int)):
+    if value is None or isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        if abs(value) >= _INTEGER_LIMIT:
+            raise CanonicalizationError(f"{path}: integer exceeds the {MAX_INTEGER_DIGITS}-digit limit")
         return value
     if isinstance(value, str):
-        return _normalize_string(value, policy)
+        return _normalize_string(value, policy, path=path)
     if isinstance(value, float):
         if not math.isfinite(value):
             raise CanonicalizationError(f"{path}: NaN and infinity are not valid canonical JSON")
@@ -65,7 +89,7 @@ def canonicalize(value: Any, policy: CanonicalPolicy | None = None, *, path: str
         for key, item in value.items():
             if not isinstance(key, str):
                 raise CanonicalizationError(f"{path}: mapping key {key!r} is not a string")
-            normalized_key = _normalize_string(key, policy)
+            normalized_key = _normalize_string(key, policy, path=f"{path} (object key)")
             if normalized_key in normalized:
                 raise CanonicalizationError(f"{path}: keys collide after Unicode normalization: {key!r}")
             normalized[normalized_key] = canonicalize(item, policy, path=f"{path}.{normalized_key}")

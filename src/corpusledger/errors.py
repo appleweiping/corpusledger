@@ -19,3 +19,11 @@ class DuplicateIdError(InputError):
 
 class ManifestError(CorpusLedgerError):
     """Raised when a manifest is invalid or incompatible."""
+
+
+class SignatureError(CorpusLedgerError):
+    """Raised when a signature artifact or key cannot be processed."""
+
+
+class SignatureVerificationError(SignatureError):
+    """Raised when cryptographic authenticity cannot be established."""

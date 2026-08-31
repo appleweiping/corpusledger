@@ -1,10 +1,13 @@
 import json
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
+from corpusledger.canonical import CanonicalPolicy
 from corpusledger.cli import run
 from corpusledger.errors import InputError
+from corpusledger.readers import Record
 
 
 def test_snapshot_verify_and_diff_end_to_end(tmp_path: Path, capsys: object) -> None:
@@ -50,3 +53,91 @@ def test_directory_snapshot_excludes_its_output_and_rejects_overwrite(tmp_path: 
     other_data.write_text('{"id":"b"}\n', encoding="utf-8")
     with pytest.raises(InputError, match="not a CorpusLedger manifest"):
         run(["snapshot", str(source), str(other_data)])
+
+
+def test_cli_explicit_reader_is_recorded_and_required_for_verification(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PipeReader:
+        name = "pipe"
+        version = "1"
+        extensions = frozenset({".pipe"})
+
+        def iter_records(
+            self,
+            path: Path,
+            *,
+            id_field: str,
+            policy: CanonicalPolicy,
+        ) -> Iterator[Record]:
+            del policy
+            data = {id_field: "a", "text": path.read_text(encoding="utf-8")}
+            yield Record("a", data, path.as_posix(), 1)
+
+    reader = PipeReader()
+    monkeypatch.setattr("corpusledger.cli.load_reader_adapter", lambda name: reader)
+    source = tmp_path / "corpus.pipe"
+    source.write_text("hello", encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    assert run(["snapshot", str(source), str(manifest), "--reader", "pipe"]) == 0
+    assert run(["verify", str(manifest)]) == 0
+    with pytest.raises(InputError, match="not requested"):
+        run(["verify", str(manifest), "--reader", "other"])
+    reader.version = "2"
+    with pytest.raises(InputError, match="installed version"):
+        run(["verify", str(manifest)])
+
+
+def test_builtin_manifest_rejects_reader_override(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "corpus.jsonl"
+    source.write_text('{"id":"a"}\n', encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    assert run(["snapshot", str(source), str(manifest)]) == 0
+    monkeypatch.setattr("corpusledger.cli.load_reader_adapter", lambda name: object())
+    with pytest.raises(InputError, match="does not record"):
+        run(["verify", str(manifest), "--reader", "unexpected"])
+
+
+def _hardlink_or_skip(source: Path, destination: Path) -> None:
+    try:
+        destination.hardlink_to(source)
+    except OSError as exc:
+        pytest.skip(f"hard links are unavailable: {exc}")
+
+
+def test_cli_rejects_hardlink_output_aliases_without_mutating_inputs(tmp_path: Path) -> None:
+    source = tmp_path / "corpus.jsonl"
+    source.write_text('{"id":"a","text":"before"}\n', encoding="utf-8")
+    snapshot_alias = tmp_path / "snapshot-alias.jsonl"
+    _hardlink_or_skip(source, snapshot_alias)
+    source_bytes = source.read_bytes()
+    with pytest.raises(InputError, match="snapshot output must not overwrite"):
+        run(["snapshot", str(source), str(snapshot_alias)])
+    assert source.read_bytes() == source_bytes
+
+    before = tmp_path / "before.manifest.json"
+    after = tmp_path / "after.manifest.json"
+    assert run(["snapshot", str(source), str(before)]) == 0
+    source.write_text('{"id":"a","text":"after"}\n', encoding="utf-8")
+    assert run(["snapshot", str(source), str(after)]) == 0
+    report_alias = tmp_path / "report.json"
+    _hardlink_or_skip(before, report_alias)
+    before_bytes = before.read_bytes()
+    with pytest.raises(InputError, match="diff output must not overwrite"):
+        run(["diff", str(before), str(after), "--format", "json", "--output", str(report_alias)])
+    assert before.read_bytes() == before_bytes
+
+
+def test_verify_rejects_manifest_hardlink_as_source(tmp_path: Path) -> None:
+    source = tmp_path / "corpus.jsonl"
+    source.write_text('{"id":"a"}\n', encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    assert run(["snapshot", str(source), str(manifest)]) == 0
+    alias = tmp_path / "manifest-alias.json"
+    _hardlink_or_skip(manifest, alias)
+    with pytest.raises(InputError, match="must not be the manifest"):
+        run(["verify", str(manifest), "--input", str(alias)])

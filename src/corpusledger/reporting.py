@@ -10,11 +10,23 @@ from .diff import CorpusDiff
 
 def render_json(diff: CorpusDiff) -> str:
     """Render pretty deterministic JSON."""
-    return json.dumps(diff.to_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    return json.dumps(diff.to_dict(), ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n"
+
+
+def _markdown_code(value: str) -> str:
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("`", "&#96;")
+        .replace("\r\n", "<br>")
+        .replace("\r", "<br>")
+        .replace("\n", "<br>")
+    )
 
 
 def _items(values: list[str]) -> str:
-    return "\n".join(f"- `{value}`" for value in values) if values else "_None_"
+    return "\n".join(f"- `{_markdown_code(value)}`" for value in values) if values else "_None_"
 
 
 def render_markdown(diff: CorpusDiff) -> str:
@@ -51,7 +63,9 @@ def render_markdown(diff: CorpusDiff) -> str:
     ]
     if diff.privacy_findings_added:
         lines.extend(
-            f"- `{item['record_id']}` `{item['path']}`: {item['kind']}" for item in diff.privacy_findings_added
+            f"- `{_markdown_code(str(item['record_id']))}` "
+            f"`{_markdown_code(str(item['path']))}`: {_markdown_code(str(item['kind']))}"
+            for item in diff.privacy_findings_added
         )
     else:
         lines.append("_None_")

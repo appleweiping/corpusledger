@@ -37,3 +37,11 @@ def test_ambiguous_values_rejected() -> None:
 
 def test_tag_like_json_objects_remain_ordinary_unambiguous_data() -> None:
     assert canonical_json({"$non_finite": "nan"}) == '{"$non_finite":"nan"}'
+
+
+def test_surrogates_and_resource_exhausting_integers_are_rejected() -> None:
+    assert canonical_json({"text": "\ud83d\ude00"}) == canonical_json({"text": "😀"})
+    with pytest.raises(CanonicalizationError, match="Unicode scalar"):
+        canonical_json({"text": chr(0xD800)})
+    with pytest.raises(CanonicalizationError, match="4300-digit"):
+        canonical_json(10**4300)

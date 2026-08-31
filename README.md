@@ -1,7 +1,10 @@
 # CorpusLedger
 
 [![CI](https://github.com/appleweiping/corpusledger/actions/workflows/ci.yml/badge.svg)](https://github.com/appleweiping/corpusledger/actions/workflows/ci.yml)
-[![Python](https://img.shields.io/badge/python-3.10--3.13-blue)](https://www.python.org/)
+[![CodeQL](https://github.com/appleweiping/corpusledger/actions/workflows/codeql.yml/badge.svg)](https://github.com/appleweiping/corpusledger/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/appleweiping/corpusledger/badge)](https://scorecard.dev/viewer/?uri=github.com/appleweiping/corpusledger)
+[![Release](https://img.shields.io/github/v/release/appleweiping/corpusledger?sort=semver)](https://github.com/appleweiping/corpusledger/releases)
+[![Python](https://img.shields.io/badge/python-3.10--3.14-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 CorpusLedger creates reproducible, inspectable manifests for JSON and JSONL NLP corpora. It answers four practical
@@ -12,9 +15,10 @@ questions without uploading data or requiring a database:
 3. Did the observed schema or record order drift?
 4. Did a new field name or token-like value introduce a review-worthy privacy risk?
 
-The runtime has no third-party dependencies and supports Python 3.10–3.13. CorpusLedger is designed for dataset
-release reviews, experiment inputs, annotation handoffs, and CI checks. It reports evidence; it does not decide whether
-a change is acceptable.
+The core runtime has no third-party dependencies and supports Python 3.10–3.14. CorpusLedger is designed for dataset
+release reviews, experiment inputs, annotation handoffs, and CI checks. Default JSONL snapshots process one raw record
+at a time, and optional Ed25519 signatures authenticate exact manifest bytes. It reports evidence; it does not decide
+whether a change is acceptable.
 
 ## Why content manifests?
 
@@ -61,6 +65,12 @@ For development tooling:
 
 ```bash
 python -m pip install -e ".[dev]"
+```
+
+Install the optional, standards-based signing support separately in production:
+
+```bash
+python -m pip install "corpusledger[signing]"
 ```
 
 ## Quick start
@@ -110,9 +120,25 @@ corpusledger verify examples/out/before.manifest.json
 corpusledger verify examples/out/before.manifest.json --input /datasets/release-7
 ```
 
+Authenticate a manifest with a detached Ed25519 signature. The verifier receives the trusted public key out of band;
+the signature envelope intentionally contains only its SHA-256 fingerprint, never key material:
+
+```bash
+openssl genpkey -algorithm Ed25519 -out release-private.pem
+openssl pkey -in release-private.pem -pubout -out release-public.pem
+
+corpusledger sign examples/out/before.manifest.json \
+  --private-key release-private.pem --output examples/out/before.manifest.sig
+corpusledger verify-signature examples/out/before.manifest.json \
+  examples/out/before.manifest.sig --public-key release-public.pem
+```
+
+For an encrypted PEM key, pass the *name* of an environment variable with `--password-env`; never put the password on
+the command line. CorpusLedger never writes private or public keys into a manifest or signature envelope.
+
 Exit status is `0` for an unchanged diff or successful verification, `1` for detected changes, and `2` for invalid
 input. Snapshot rejects duplicate IDs across all files in a directory. Its output is excluded when it sits inside the
-input directory, and an output path may not overwrite the input corpus file.
+input directory, and output paths may not overwrite—or hard-link to—their protected corpus, manifest, or key inputs.
 
 ## Input rules
 
@@ -121,11 +147,41 @@ input directory, and an output path may not overwrite the input corpus file.
 - directory: recursively includes `.json` and `.jsonl` files in relative-path order.
 - each record must contain the ID field (`id` by default); IDs must be non-empty scalars and unique after string
   conversion and the configured Unicode normalization.
-- JSON must be UTF-8 and contain no duplicate object keys or non-finite numeric extensions. Malformed or ambiguous JSON
-  includes the file and line/record position in its error.
+- JSON must be UTF-8, contain only Unicode scalar values, and contain no duplicate object keys or non-finite numeric
+  extensions. Numbers use Python's finite binary64 semantics; integers are limited to 4,300 digits so behavior is stable
+  across supported Python versions. Valid UTF-16 escape pairs normalize to their scalar value; unpaired surrogates fail.
+  Malformed or ambiguous JSON includes the file and line/record position in its error.
 
 Choose another identity field with `--id-field example_id`. Stable IDs are essential: changing an ID is intentionally
 reported as one removal and one addition.
+
+### Streaming boundary
+
+`.jsonl` is the streaming source format: each line is parsed, normalized, scanned, summarized, and then discarded.
+Memory still cannot be constant overall because the output itself contains one entry and field-hash map per record,
+and global duplicate detection requires all normalized IDs. The precise lower bound is therefore
+`O(manifest entries + unique IDs + schema paths + privacy findings + largest record)`, while raw corpus bodies are not
+retained. A `.json` array is materialized by Python's standard JSON decoder. The opt-in `--sort-lists` policy also
+retains canonical sequence members so v0.1 hashes remain compatible; use the default list-preserving policy for the
+streaming path. See [architecture](docs/architecture.md) and the [reproducible benchmark](benchmarks/README.md).
+
+### Reader adapters
+
+Built-in `.json` and `.jsonl` readers require no plugin. A reviewed package may expose another file reader under the
+`corpusledger.readers` entry-point group:
+
+```toml
+[project.entry-points."corpusledger.readers"]
+parquet = "my_corpus_adapter:ParquetReader"
+```
+
+The object implements the typed `ReaderAdapter` protocol (`name`, `version`, lowercase single-suffix `extensions`, and
+`iter_records`). Load it explicitly with `snapshot --reader parquet`; CorpusLedger never auto-imports third-party
+readers during discovery. The adapter name/version is persisted in `reader_metadata`, and verification refuses a
+missing, different, or differently versioned adapter. Python callers may inject a reader object directly via
+`build_manifest(..., reader=adapter)` without packaging an entry point. Adapter identity metadata rejects surrounding
+whitespace, control/format characters, and surrogate code points. Discovery and imports execute trusted installed code
+only after selection; error messages expose the failure type without echoing arbitrary plugin exception text.
 
 ## Python API
 
@@ -154,11 +210,21 @@ canonical_json(["b", "a"], CanonicalPolicy(list_strategy="sort"))
 Sorting lists changes semantics for sequence data. Use it only for fields you know are set-like; the current policy is
 corpus-wide and is recorded in the manifest.
 
+The iterator API is available when a pipeline needs validated records without constructing a manifest:
+
+```python
+from corpusledger import iter_corpus
+
+for record in iter_corpus("large-corpus.jsonl"):
+    consume(record.record_id, record.data)
+```
+
 ## What a manifest contains
 
 - format and normalization version;
 - hash algorithm and complete canonicalization policy;
 - privacy scanner version and complete scanner configuration;
+- optional, explicit reader adapter identity/version;
 - order-independent corpus hash and separate order hash;
 - logical file hashes;
 - record hash, source, position, and per-field hashes;
@@ -185,6 +251,11 @@ change patterns, so treat them according to your data-governance policy.
 Hashes are integrity indicators, not encryption, authentication, or proof of authorship. Low-entropy values can be
 guessed by an attacker who has a manifest and a small candidate set.
 
+Detached Ed25519 signatures add authenticity only when the verifier obtains the expected public key through a trusted
+channel. A valid signature does not make privacy findings complete, make the underlying corpus available, or establish
+that the signer approved its semantic quality. Signature envelopes bind exact manifest bytes; even harmless whitespace
+changes require a new signature. See [the security policy](SECURITY.md) for key-handling and trust guidance.
+
 The corpus, order, record, and file hashes are reproducible across machines. The manifest also records an absolute
 `source` path so verification works without extra arguments on the creating machine; consequently, complete manifest
 bytes differ when the same corpus is snapshotted at another location. Use `verify --input` after moving a corpus.
@@ -195,7 +266,7 @@ bytes differ when the same corpus is snapshotted at another location. Use `verif
 - validating against a user-authored JSON Schema;
 - detecting all personal data or credentials;
 - anonymizing, redacting, repairing, or transforming the corpus;
-- cryptographic signing or trusted timestamps;
+- trusted timestamps, transparency logs, or public-key distribution;
 - estimating model or annotation quality;
 - claiming two reordered lists are equivalent by default.
 
@@ -210,18 +281,20 @@ python -m mypy
 python -m build
 ```
 
-Tests cover deterministic Unicode normalization, Unicode-equivalent and duplicate IDs, duplicate JSON keys, schema
-drift, collision-free field paths, order-only changes, privacy redaction/configuration, strict manifest loading, full
-verification, and CLI exit behavior. CI tests and builds distributions on Python 3.10–3.13.
+Tests cover deterministic Unicode normalization, property-based canonicalization/roundtrips, streaming-vs-v0.1 hash
+compatibility, adapters, Unicode-equivalent and duplicate IDs, duplicate JSON keys, schema drift, collision-free field
+paths, order-only changes, privacy redaction/configuration, strict manifest loading, full verification, Ed25519
+tampering/key mismatch, and CLI exit behavior. CI tests and builds distributions on Python 3.10–3.14, with packaged
+wheel smoke tests on Linux, Windows, and macOS.
 
 ## Roadmap
 
-- per-field list-order policies;
-- streaming manifest construction for corpora larger than memory;
+- per-field list-order policies with an external-sort implementation;
+- bounded-size or external manifest indexes for corpora whose manifest metadata itself exceeds memory;
 - optional JSON Schema export and compatibility modes;
-- signed manifests and trusted release attestations;
+- Sigstore-compatible keyless attestations and transparency-log integration;
 - configurable path exclusion and privacy rule packs;
-- adapters for columnar formats in optional packages.
+- maintained adapters for columnar and remote object-store formats in separate packages.
 
 ## License and security
 

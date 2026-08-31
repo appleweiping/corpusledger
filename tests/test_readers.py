@@ -3,7 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from corpusledger.errors import DuplicateIdError, InputError
+from corpusledger.errors import DuplicateIdError, InputError, ManifestError
+from corpusledger.manifest import build_manifest
 from corpusledger.readers import read_corpus
 
 
@@ -61,3 +62,29 @@ def test_ambiguous_json_extensions_are_rejected(tmp_path: Path, content: str) ->
     write(path, content)
     with pytest.raises(InputError, match="line 1"):
         read_corpus(path)
+
+
+@pytest.mark.parametrize(
+    ("content", "message"),
+    [
+        ('{"id":"first","value":1e400}\n', "finite binary64"),
+        ('{"id":"first","value":' + "9" * 4_301 + "}\n", "4300-digit"),
+    ],
+)
+def test_numeric_resource_boundaries_are_stable(tmp_path: Path, content: str, message: str) -> None:
+    path = tmp_path / "numeric.jsonl"
+    write(path, content)
+    with pytest.raises(InputError, match=message):
+        read_corpus(path)
+
+
+def test_escaped_surrogate_errors_include_record_location(tmp_path: Path) -> None:
+    invalid_id = tmp_path / "invalid-id.jsonl"
+    write(invalid_id, '{"id":"\\ud800"}\n')
+    with pytest.raises(InputError, match=r"record 1.*invalid ID.*Unicode scalar"):
+        read_corpus(invalid_id)
+
+    invalid_value = tmp_path / "invalid-value.jsonl"
+    write(invalid_value, '{"id":"valid","text":"\\ud800"}\n')
+    with pytest.raises(ManifestError, match=r"record 1.*Unicode scalar"):
+        build_manifest(invalid_value)

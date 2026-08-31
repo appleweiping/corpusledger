@@ -1,0 +1,33 @@
+{
+  "allocation_profile": {
+    "input_bytes": 3775238,
+    "manifest_bytes": 6440519,
+    "peak_tracemalloc_mib": 33.19,
+    "records": 10000,
+    "seconds_with_tracing": 149.7214
+  },
+  "benchmark": "jsonl-snapshot-v1",
+  "corpusledger_version": "0.2.0",
+  "input": {
+    "bytes": 37842381,
+    "payload_bytes_per_record": 256,
+    "records": 100000
+  },
+  "manifest_bytes": 63790514,
+  "platform": {
+    "machine": "AMD64",
+    "operating_system": "Windows-11-10.0.26200-SP0",
+    "python": "3.14.5"
+  },
+  "results": {
+    "median_records_per_second": 266.34,
+    "median_seconds": 375.4652,
+    "repeat_seconds": [
+      369.0899,
+      592.1088,
+      375.4652
+    ],
+    "repeats": 3
+  },
+  "scope": "Throughput is end-to-end strict JSONL parse, canonicalization, manifest construction, privacy/schema aggregation, and manifest write without tracing. The separate allocation profile uses a smaller corpus because tracemalloc strongly perturbs runtime; its peak is Python allocations, not process RSS."
+}

@@ -19,6 +19,7 @@ missing record-entry, hash-metadata, and privacy-metadata keys are invalid.
 | `records` | Ordered record entries |
 | `schema` | Observed record count and field summaries |
 | `privacy_findings` | Sorted, redacted heuristic findings |
+| `reader_metadata` | Optional explicit third-party reader `name` and `version`; omitted for built-ins |
 
 Each record entry has `record_id`, content `hash`, relative `source`, one-based `position`, and `field_hashes`. A field
 hash reveals equality/change but not the original value. Object leaves use RFC 6901 JSON Pointer paths; arrays are a
@@ -34,6 +35,29 @@ individual record content at that path is unchanged; this is intentionally repor
 ## Reproducibility
 
 To reproduce a hash, use the algorithm and exact policy in `hash_metadata`. Canonical JSON is UTF-8, compact, key-sorted,
-and Unicode-normalized. Hashes are lowercase hexadecimal. Implementations must not silently compare manifests with
-different hash or privacy metadata. The content hashes are location-independent, while the top-level absolute `source`
-means full manifest bytes are intentionally location-specific.
+Unicode-normalized, and restricted to Unicode scalar values. JSON floats must fit finite binary64; integers use the
+documented 4,300-digit resource limit. Hashes are lowercase hexadecimal. Implementations must not silently compare manifests with
+different hash, privacy, or reader metadata. The content hashes are location-independent, while the top-level absolute
+`source` means full manifest bytes are intentionally location-specific.
+
+`reader_metadata` is an additive top-level extension permitted by the original version-1 forward-compatibility rule.
+Consequently, existing version-1 manifests need no migration and load/save without acquiring the field. A manifest that
+records a reader adapter must be rebuilt with the exact recorded name and version. Nested reader metadata is strict and
+accepts only those two non-empty strings, without surrounding whitespace, control/format characters, or surrogate code
+points.
+
+## Detached signature envelope
+
+Signatures use a separate canonical JSON artifact with format `corpusledger-signature/1`:
+
+| Field | Meaning |
+|---|---|
+| `format` | Signature envelope format |
+| `algorithm` | Exactly `ed25519` |
+| `key_id` | SHA-256 of the raw 32-byte Ed25519 public key |
+| `manifest_sha256` | SHA-256 of the exact manifest file bytes |
+| `signature` | Base64 encoding of the 64-byte Ed25519 signature over those exact bytes |
+
+The envelope contains no public or private key. Verification requires a separately trusted Ed25519 PEM public key and
+checks its fingerprint before checking the digest and signature. Unknown/missing fields, duplicate JSON members,
+non-canonical digest shapes, malformed base64, wrong key identities, and changed manifest bytes fail closed.

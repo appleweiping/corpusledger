@@ -10,20 +10,30 @@ from pathlib import Path
 from typing import Any, cast
 
 from .canonical import CANONICAL_VERSION, CanonicalPolicy, canonical_json, canonicalize
-from .errors import ManifestError
+from .errors import CanonicalizationError, InputError, ManifestError
 from .fingerprint import (
+    CanonicalSequenceHasher,
     HashAlgorithm,
-    corpus_fingerprint,
-    file_fingerprints,
     metadata,
-    order_fingerprint,
     record_fingerprint,
 )
 from .paths import join_pointer
-from .privacy import PRIVACY_VERSION, PrivacyConfig, scan_records
-from .readers import Record, read_corpus
-from .schema import infer_schema
-from .strictjson import StrictJsonError, object_without_duplicates, reject_constant
+from .privacy import PRIVACY_VERSION, PrivacyConfig, scan_record
+from .readers import (
+    ReaderAdapter,
+    Record,
+    iter_corpus,
+    validate_reader_adapter,
+    validate_reader_identity,
+)
+from .schema import SchemaAccumulator
+from .strictjson import (
+    StrictJsonError,
+    bounded_int,
+    finite_float,
+    object_without_duplicates,
+    reject_constant,
+)
 
 MANIFEST_FORMAT = "corpusledger/1"
 _HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
@@ -68,10 +78,13 @@ class Manifest:
     records: tuple[RecordEntry, ...]
     schema: dict[str, Any]
     privacy_findings: tuple[dict[str, Any], ...]
+    reader_metadata: dict[str, str] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a serializable representation."""
         result = asdict(self)
+        if self.reader_metadata is None:
+            result.pop("reader_metadata")
         result["records"] = [asdict(record) for record in self.records]
         result["privacy_findings"] = list(self.privacy_findings)
         return result
@@ -94,6 +107,8 @@ class Manifest:
                 Path(path).read_text(encoding="utf-8"),
                 object_pairs_hook=object_without_duplicates,
                 parse_constant=reject_constant,
+                parse_float=finite_float,
+                parse_int=bounded_int,
             )
         except (OSError, UnicodeError, json.JSONDecodeError, StrictJsonError) as exc:
             raise ManifestError(f"cannot load manifest {path}: {exc}") from exc
@@ -119,6 +134,7 @@ class Manifest:
             hash_metadata = _validate_hash_metadata(raw["hash_metadata"])
             policy = CanonicalPolicy(**hash_metadata["policy"])
             privacy_metadata = _validate_privacy_metadata(raw["privacy_metadata"])
+            reader_metadata = _validate_reader_metadata(raw.get("reader_metadata"))
             corpus_hash = _validate_digest(raw["corpus_hash"], "corpus_hash")
             order_hash = _validate_digest(raw["order_hash"], "order_hash")
             files = _validate_hash_mapping(raw["files"], "files")
@@ -137,8 +153,9 @@ class Manifest:
                 records=entries,
                 schema=schema,
                 privacy_findings=findings,
+                reader_metadata=reader_metadata,
             )
-        except (KeyError, TypeError, ValueError) as exc:
+        except (InputError, KeyError, TypeError, ValueError) as exc:
             raise ManifestError(f"invalid manifest structure in {path}: {exc}") from exc
 
 
@@ -195,6 +212,16 @@ def _validate_privacy_metadata(value: Any) -> dict[str, Any]:
     if config_value != config.to_dict():
         raise ValueError("privacy_metadata.config is not canonical")
     return {"version": PRIVACY_VERSION, "config": config.to_dict()}
+
+
+def _validate_reader_metadata(value: Any) -> dict[str, str] | None:
+    if value is None:
+        return None
+    metadata_value = _required_mapping(value, "reader_metadata")
+    if set(metadata_value) != {"name", "version"}:
+        raise ValueError("reader_metadata has missing or unknown fields")
+    name, version = validate_reader_identity(metadata_value.get("name"), metadata_value.get("version"))
+    return {"name": name, "version": version}
 
 
 def _validate_record_entries(value: Any, policy: CanonicalPolicy) -> tuple[RecordEntry, ...]:
@@ -254,38 +281,97 @@ def build_manifest(
     policy: CanonicalPolicy | None = None,
     privacy: PrivacyConfig | None = None,
     exclude_paths: Iterable[str | Path] = (),
+    reader: ReaderAdapter | None = None,
 ) -> Manifest:
-    """Read a corpus and build its complete manifest."""
+    """Stream a corpus into a complete format-version-1 manifest.
+
+    Default JSONL input is never materialized as raw records. Memory retains the
+    information required by the manifest itself, the global duplicate-ID index,
+    schema aggregates, and privacy findings. JSON arrays are decoded as a whole;
+    ``list_strategy='sort'`` also retains canonical sequence members to preserve
+    the exact version-1 hash semantics.
+    """
+
     policy = policy or CanonicalPolicy()
     privacy = privacy or PrivacyConfig()
     root = Path(source).resolve()
-    records = read_corpus(root, id_field, policy=policy, exclude_paths=exclude_paths)
-    canonical_records: dict[str, dict[str, Any]] = {}
-    for record in records:
-        normalized = canonicalize(record.data, policy)
+    active_reader = validate_reader_adapter(reader) if reader is not None else None
+    source_base = root if root.is_dir() else root.parent
+    relative_sources: dict[str, str] = {}
+
+    def relative_source(source_path: str) -> str:
+        cached = relative_sources.get(source_path)
+        if cached is not None:
+            return cached
+        path = Path(source_path)
+        try:
+            value = path.relative_to(source_base).as_posix()
+        except ValueError:
+            value = path.as_posix()
+        relative_sources[source_path] = value
+        return value
+
+    entries: list[RecordEntry] = []
+    schema = SchemaAccumulator()
+    findings: list[dict[str, Any]] = []
+    order_hasher = CanonicalSequenceHasher(policy, algorithm)
+    relative_files: dict[str, str] = {}
+    current_source: str | None = None
+    file_hasher: CanonicalSequenceHasher | None = None
+
+    def finish_file() -> None:
+        nonlocal file_hasher
+        if current_source is not None and file_hasher is not None:
+            relative_files[relative_source(current_source)] = file_hasher.finish()
+            file_hasher = None
+
+    for record in iter_corpus(
+        root,
+        id_field,
+        policy=policy,
+        exclude_paths=exclude_paths,
+        reader=active_reader,
+    ):
+        if record.source != current_source:
+            finish_file()
+            current_source = record.source
+            file_hasher = CanonicalSequenceHasher(policy, algorithm)
+        try:
+            normalized = canonicalize(record.data, policy)
+        except CanonicalizationError as exc:
+            raise ManifestError(
+                f"cannot canonicalize {record.source} record {record.position} ({record.record_id!r}): {exc}"
+            ) from exc
         if not isinstance(normalized, dict):
             raise ManifestError(f"record {record.record_id!r} did not normalize to a JSON object")
-        canonical_records[record.record_id] = normalized
-    hashes = {record.record_id: record_fingerprint(record, policy, algorithm) for record in records}
-    entries = tuple(
-        RecordEntry(
-            record_id=record.record_id,
-            hash=hashes[record.record_id],
-            source=_relative_source(record, root),
-            position=record.position,
-            field_hashes={
-                path: record_fingerprint(
-                    Record(record.record_id, {"value": value}, record.source, record.position),
-                    policy,
-                    algorithm,
-                )
-                for path, value in _flatten(canonical_records[record.record_id]).items()
-            },
+        normalized_record = Record(record.record_id, normalized, record.source, record.position)
+        record_hash = record_fingerprint(normalized_record, policy, algorithm)
+        entries.append(
+            RecordEntry(
+                record_id=record.record_id,
+                hash=record_hash,
+                source=relative_source(record.source),
+                position=record.position,
+                field_hashes={
+                    path: record_fingerprint(
+                        Record(record.record_id, {"value": value}, record.source, record.position),
+                        policy,
+                        algorithm,
+                    )
+                    for path, value in _flatten(normalized).items()
+                },
+            )
         )
-        for record in records
-    )
-    file_hashes = file_fingerprints(records, policy, algorithm)
-    relative_files = {_relative_path(Path(path), root): value for path, value in file_hashes.items()}
+        schema.observe(normalized)
+        findings.extend(scan_record(record.record_id, normalized, privacy))
+        order_hasher.add(record.record_id)
+        assert file_hasher is not None
+        file_hasher.add({"id": record.record_id, "record": canonical_json(normalized, policy)})
+    finish_file()
+
+    corpus_hasher = CanonicalSequenceHasher(policy, algorithm)
+    for entry in sorted(entries, key=lambda item: item.record_id):
+        corpus_hasher.add({"id": entry.record_id, "hash": entry.hash})
     hash_meta = asdict(metadata(policy, algorithm))
     hash_meta["canonical_version"] = CANONICAL_VERSION
     return Manifest(
@@ -294,27 +380,18 @@ def build_manifest(
         id_field=id_field,
         hash_metadata=hash_meta,
         privacy_metadata={"version": PRIVACY_VERSION, "config": privacy.to_dict()},
-        corpus_hash=corpus_fingerprint(hashes, policy, algorithm),
-        order_hash=order_fingerprint((record.record_id for record in records), policy, algorithm),
+        corpus_hash=corpus_hasher.finish(),
+        order_hash=order_hasher.finish(),
         files=relative_files,
-        records=entries,
-        schema=infer_schema(canonical_records[record.record_id] for record in records),
+        records=tuple(entries),
+        schema=schema.to_dict(),
         privacy_findings=tuple(
-            scan_records(
-                ((record.record_id, canonical_records[record.record_id]) for record in records),
-                privacy,
+            sorted(
+                findings,
+                key=lambda item: (str(item["record_id"]), str(item["path"]), str(item["kind"])),
             )
         ),
+        reader_metadata=(
+            {"name": active_reader.name, "version": active_reader.version} if active_reader is not None else None
+        ),
     )
-
-
-def _relative_path(path: Path, root: Path) -> str:
-    base = root if root.is_dir() else root.parent
-    try:
-        return path.resolve().relative_to(base).as_posix()
-    except ValueError:
-        return path.resolve().as_posix()
-
-
-def _relative_source(record: Record, root: Path) -> str:
-    return _relative_path(Path(record.source), root)
