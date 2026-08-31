@@ -1,0 +1,3 @@
+{"id":"doc-2","text":"需要再次人工复核。","labels":["review"],"metadata":{"language":"zh","reviewed":false}}
+{"id":"doc-1","text":"The grid is stable.","labels":["positive"],"metadata":{"language":"en"}}
+{"id":"doc-3","text":"New sample.","labels":[],"metadata":{"language":"en"}}
