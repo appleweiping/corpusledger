@@ -36,6 +36,8 @@ jobs:
         run: ruff format --check .
       - name: Type check
         run: mypy src
+      - name: Security scan
+        run: bandit -q -c pyproject.toml -r src
 
   tests:
     name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
