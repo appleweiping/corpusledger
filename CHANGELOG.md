@@ -9,6 +9,7 @@ All notable changes follow the principles of Keep a Changelog.
 - Atomic streaming transformation pipelines with ID preservation, source/output digests,
   failure-safe output replacement, and resumable provenance checkpoints.
 - Transactional snapshot catalog with named versions, parent lineage, and manifest diffs.
+- SHA-256 object storage and deterministic ZIP snapshot bundles.
 
 ## [0.2.0] - 2026-08-31
 

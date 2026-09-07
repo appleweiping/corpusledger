@@ -14,16 +14,19 @@ from .signing import (
     sign_manifest,
     verify_manifest_signature,
 )
+from .store import BundleReport, ObjectStore, bundle_snapshot
 
 __all__ = [
     "CANONICAL_VERSION",
     "MANIFEST_FORMAT",
     "READER_ENTRY_POINT_GROUP",
     "SIGNATURE_FORMAT",
+    "BundleReport",
     "CanonicalPolicy",
     "CorpusDiff",
     "InputError",
     "Manifest",
+    "ObjectStore",
     "PipelineReport",
     "PipelineStep",
     "PrivacyConfig",
@@ -33,6 +36,7 @@ __all__ = [
     "SnapshotCatalog",
     "SnapshotRef",
     "build_manifest",
+    "bundle_snapshot",
     "canonical_bytes",
     "canonical_json",
     "canonicalize",
