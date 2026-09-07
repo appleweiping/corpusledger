@@ -21,6 +21,7 @@ from .errors import (
 )
 from .manifest import Manifest, build_manifest
 from .pipeline import drop_fields, rename_field, run_pipeline, select_fields
+from .plan import load_pipeline_plan
 from .privacy import PrivacyConfig
 from .readers import ReaderAdapter, load_reader_adapter
 from .reporting import render
@@ -123,6 +124,7 @@ def _parser() -> argparse.ArgumentParser:
     pipeline.add_argument("--select", action="append", default=[], help="comma-separated fields to keep")
     pipeline.add_argument("--drop", action="append", default=[], help="comma-separated fields to drop")
     pipeline.add_argument("--rename", action="append", default=[], help="rename OLD=NEW (repeatable)")
+    pipeline.add_argument("--plan", help="strict versioned JSON plan for select/drop/rename steps")
     pipeline.add_argument("--state", help="checkpoint path (default: OUTPUT.state.json)")
     pipeline.add_argument("--resume", action="store_true", help="reuse a matching completed checkpoint")
     return parser
@@ -239,7 +241,9 @@ def run(argv: list[str] | None = None) -> int:
     if args.command == "stream":
         return _run_stream(args)
     if args.command == "pipeline":
-        steps = []
+        if args.plan and (args.select or args.drop or args.rename):
+            raise InputError("--plan cannot be combined with --select, --drop, or --rename")
+        steps = list(load_pipeline_plan(args.plan).compile()) if args.plan else []
         for value in args.select:
             steps.append(select_fields(tuple(part.strip() for part in value.split(","))))
         for value in args.rename:

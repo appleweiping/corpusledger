@@ -11,6 +11,8 @@ All notable changes follow the principles of Keep a Changelog.
   processors, digest reports, and strict failure status handling.
 - Add a resumable `corpusledger pipeline` CLI for deterministic select, rename,
   and drop transformations with checkpoint provenance.
+- Add strict versioned JSON pipeline plans that compile to the same built-in
+  transformations and are accepted by `corpusledger pipeline --plan`.
 
 ### Added
 

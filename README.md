@@ -243,6 +243,11 @@ for record in iter_corpus("large-corpus.jsonl"):
     consume(record.record_id, record.data)
 ```
 
+The built-in `select`, `drop`, and `rename` transformations can also be
+described by a strict versioned JSON plan and passed to
+`corpusledger pipeline --plan`. Plans never import arbitrary Python; see
+[pipeline plans](docs/pipeline-plans.md).
+
 ## What a manifest contains
 
 - format and normalization version;
