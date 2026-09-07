@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -21,6 +22,7 @@ from .privacy import PrivacyConfig
 from .readers import ReaderAdapter, load_reader_adapter
 from .reporting import render
 from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
+from .store import ObjectStore, bundle_snapshot
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -68,6 +70,11 @@ def _parser() -> argparse.ArgumentParser:
     verify_signature.add_argument("manifest")
     verify_signature.add_argument("signature")
     verify_signature.add_argument("--public-key", required=True, help="trusted Ed25519 PEM public key path")
+    bundle = subparsers.add_parser("bundle", help="create a deterministic source snapshot ZIP")
+    bundle.add_argument("manifest")
+    bundle.add_argument("output")
+    bundle.add_argument("--input", help="override the source path recorded in the manifest")
+    bundle.add_argument("--store", help="optional SHA-256 object-store directory")
     return parser
 
 
@@ -108,6 +115,26 @@ def run(argv: list[str] | None = None) -> int:
         )
         manifest.save(args.output)
         print(f"wrote {len(manifest.records)} records to {args.output}")
+        return 0
+    if args.command == "bundle":
+        manifest_path = Path(args.manifest).resolve()
+        output_path = Path(args.output).resolve()
+        source_path = Path(args.input or Manifest.load(manifest_path).source).resolve()
+        _require_distinct(output_path, manifest_path, message="bundle output must differ from its manifest")
+        manifest = Manifest.load(manifest_path)
+        store = ObjectStore(args.store) if args.store else None
+        report = bundle_snapshot(manifest, source_path, output_path, store=store)
+        print(
+            json.dumps(
+                {
+                    "archive_digest": report.archive_digest,
+                    "manifest_digest": report.manifest_digest,
+                    "files": list(report.files),
+                    "bytes": report.bytes,
+                },
+                sort_keys=True,
+            )
+        )
         return 0
     if args.command == "diff":
         if args.output:

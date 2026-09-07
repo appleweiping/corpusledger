@@ -27,6 +27,18 @@ def test_snapshot_verify_and_diff_end_to_end(tmp_path: Path, capsys: object) -> 
     assert json.loads(report.read_text(encoding="utf-8"))["changed_records"]["a"]
 
 
+def test_bundle_command_writes_reproducible_archive(tmp_path: Path, capsys: object) -> None:
+    source = tmp_path / "corpus.jsonl"
+    source.write_text('{"id":"a","text":"hello"}\n', encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    archive = tmp_path / "snapshot.zip"
+    assert run(["snapshot", str(source), str(manifest)]) == 0
+    assert run(["bundle", str(manifest), str(archive), "--store", str(tmp_path / "objects")]) == 0
+    result = json.loads(capsys.readouterr().out.splitlines()[-1])
+    assert result["files"] == ["manifest.json", "source/corpus.jsonl"]
+    assert archive.is_file() and result["bytes"] == archive.stat().st_size
+
+
 def test_verify_checks_all_derived_manifest_sections(tmp_path: Path) -> None:
     source = tmp_path / "corpus.jsonl"
     source.write_text('{"id":"a","text":"hello"}\n', encoding="utf-8")
