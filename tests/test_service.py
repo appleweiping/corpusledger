@@ -71,6 +71,22 @@ def test_service_diff_and_bundle_verification(tmp_path) -> None:
     assert verified["files"] == ["manifest.json", "source/after.jsonl"]
 
 
+def test_service_exports_manifest_schema(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"a","meta":{"lang":"en"}}\n', encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    build_manifest(source).save(manifest_path)
+    result = CorpusService().dispatch(
+        {
+            "operation": "schema",
+            "manifest": str(manifest_path),
+            "title": "records",
+        }
+    )
+    assert result["schema"]["title"] == "records"
+    assert result["schema"]["properties"]["meta"]["properties"]["lang"]["type"] == "string"
+
+
 def test_service_catalog_operations_are_typed_and_lineage_aware(tmp_path) -> None:
     first_source = tmp_path / "first.jsonl"
     second_source = tmp_path / "second.jsonl"
@@ -162,7 +178,14 @@ def test_service_catalog_validates_request_shape(tmp_path) -> None:
         {"operation": "catalog", "database": str(database), "action": "list", "name": 1},
         {"operation": "catalog", "database": str(database), "action": "lineage", "corpus_hash": ""},
         {"operation": "catalog", "database": str(database), "action": "diff", "name": "x", "before": True, "after": 2},
-        {"operation": "catalog", "database": str(database), "action": "register", "name": "x", "manifest": "x", "tags": "bad"},
+        {
+            "operation": "catalog",
+            "database": str(database),
+            "action": "register",
+            "name": "x",
+            "manifest": "x",
+            "tags": "bad",
+        },
         {"operation": "catalog", "database": str(database), "action": "unknown"},
     )
     for request in invalid_requests:

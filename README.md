@@ -112,6 +112,15 @@ The report is deliberately value-free. To create machine-readable output:
 corpusledger diff examples/out/before.manifest.json examples/out/after.manifest.json --format json --output audit.json
 ```
 
+Export the observed shape for downstream validators or editor tooling:
+
+```bash
+corpusledger schema examples/out/before.manifest.json --title support-corpus --output schema.json
+```
+
+See [Observed schema export](docs/schema-export.md) for the conservative
+draft-2020-12 mapping and service request shape.
+
 Verify that a recorded source still matches every derived manifest section:
 
 ```bash

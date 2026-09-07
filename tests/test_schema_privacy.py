@@ -3,7 +3,7 @@ import math
 import pytest
 
 from corpusledger.privacy import PrivacyConfig, scan_records, shannon_entropy
-from corpusledger.schema import infer_schema, schema_drift
+from corpusledger.schema import infer_schema, schema_drift, to_json_schema
 
 
 def test_schema_is_conservative_and_summarizes_collections() -> None:
@@ -26,6 +26,66 @@ def test_schema_drift_classifies_changes() -> None:
     assert drift["added_fields"] == ["/new"]
     assert drift["removed_fields"] == ["/old"]
     assert "/a" in drift["changed_fields"]
+
+
+def test_schema_exports_nested_json_schema_with_required_and_mixed_types() -> None:
+    inferred = infer_schema(
+        [
+            {"id": "a", "meta": {"lang": "en"}, "labels": ["x"]},
+            {"id": "b", "meta": {}, "labels": [1, 2], "optional": True},
+        ]
+    )
+    exported = to_json_schema(inferred, title="Demo", schema_id="urn:demo")
+    assert exported["$schema"].endswith("draft/2020-12/schema")
+    assert exported["title"] == "Demo"
+    assert exported["$id"] == "urn:demo"
+    assert exported["required"] == ["id", "labels", "meta"]
+    assert exported["properties"]["labels"]["items"]["type"] == ["integer", "string"]
+    assert exported["properties"]["meta"]["properties"]["lang"]["type"] == "string"
+    assert exported["properties"]["optional"]["type"] == "boolean"
+
+
+def test_schema_export_rejects_malformed_inferred_shape() -> None:
+    with pytest.raises(ValueError, match="record_count"):
+        to_json_schema({"record_count": True, "fields": {}})
+    with pytest.raises(ValueError, match="JSON Pointers"):
+        to_json_schema({"record_count": 1, "fields": {"name": {}}})
+
+
+@pytest.mark.parametrize(
+    ("value", "message"),
+    [
+        ([], "object"),
+        ({"record_count": 1, "fields": []}, "fields"),
+        ({"record_count": 1, "fields": {"/x": []}}, "object"),
+        ({"record_count": 1, "fields": {"/x": {"types": []}}}, "non-empty"),
+        ({"record_count": 1, "fields": {"/x": {"types": ["date"]}}}, "unsupported"),
+        (
+            {"record_count": 1, "fields": {"/x": {"types": ["array"], "item_types": "str"}}},
+            "item_types",
+        ),
+        (
+            {"record_count": 1, "fields": {"/x": {"types": ["object"], "object_keys": [1]}}},
+            "object_keys",
+        ),
+        (
+            {"record_count": 1, "fields": {"/x": {"types": ["array"], "min_items": -1}}},
+            "min_items",
+        ),
+    ],
+)
+def test_schema_export_rejects_invalid_metadata(value: object, message: str) -> None:
+    with pytest.raises((TypeError, ValueError), match=message):
+        to_json_schema(value)  # type: ignore[arg-type]
+
+
+def test_schema_export_validates_titles_ids_and_path_collisions() -> None:
+    valid = {"record_count": 1, "fields": {"/x": {"types": ["string"], "optional": False}}}
+    for kwargs in ({"title": ""}, {"schema_id": ""}):
+        with pytest.raises(ValueError, match="non-empty"):
+            to_json_schema(valid, **kwargs)
+    with pytest.raises(ValueError, match="invalid"):
+        to_json_schema({"record_count": 1, "fields": {"//x": {"types": ["string"]}}})
 
 
 def test_privacy_scan_redacts_values() -> None:

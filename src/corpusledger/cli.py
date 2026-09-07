@@ -27,6 +27,7 @@ from .plan import load_pipeline_plan
 from .privacy import PrivacyConfig
 from .readers import ReaderAdapter, load_reader_adapter
 from .reporting import render
+from .schema import to_json_schema
 from .service import create_server
 from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
 from .store import ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
@@ -50,6 +51,12 @@ def _parser() -> argparse.ArgumentParser:
         "--reader",
         help="explicit corpusledger.readers entry point (third-party code is loaded only when named)",
     )
+
+    schema_export = subparsers.add_parser("schema", help="export a manifest's observed schema as JSON Schema")
+    schema_export.add_argument("manifest")
+    schema_export.add_argument("--title")
+    schema_export.add_argument("--id", dest="schema_id")
+    schema_export.add_argument("--output")
 
     difference = subparsers.add_parser("diff", help="compare two manifests")
     difference.add_argument("before")
@@ -248,6 +255,19 @@ def run(argv: list[str] | None = None) -> int:
         )
         manifest.save(args.output)
         print(f"wrote {len(manifest.records)} records to {args.output}")
+        return 0
+    if args.command == "schema":
+        manifest_path = Path(args.manifest).resolve()
+        schema_output = Path(args.output).resolve() if args.output else None
+        if schema_output is not None:
+            _require_distinct(
+                schema_output,
+                manifest_path,
+                message="schema output must not overwrite the manifest",
+            )
+        manifest = Manifest.load(manifest_path)
+        payload = to_json_schema(manifest.schema, title=args.title, schema_id=args.schema_id)
+        _write_report(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", args.output)
         return 0
     if args.command == "index":
         manifest_path = Path(args.manifest).resolve()

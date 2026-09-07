@@ -17,6 +17,7 @@ from typing import Any
 from .catalog import SnapshotCatalog
 from .diff import compare
 from .manifest import Manifest, build_manifest
+from .schema import to_json_schema
 from .store import verify_bundle
 
 
@@ -49,9 +50,21 @@ class CorpusService:
                 "files": list(report.files),
                 "bytes": report.bytes,
             }
+        if operation == "schema":
+            manifest = Manifest.load(_required_path(request, "manifest"))
+            title = request.get("title")
+            schema_id = request.get("id")
+            if title is not None and not isinstance(title, str):
+                raise ValueError("title must be a string or omitted")
+            if schema_id is not None and not isinstance(schema_id, str):
+                raise ValueError("id must be a string or omitted")
+            return {
+                "operation": operation,
+                "schema": to_json_schema(manifest.schema, title=title, schema_id=schema_id),
+            }
         if operation == "catalog":
             return _catalog_request(request)
-        raise ValueError("operation must be one of: manifest, diff, verify_bundle, catalog")
+        raise ValueError("operation must be one of: manifest, diff, verify_bundle, schema, catalog")
 
 
 def create_server(

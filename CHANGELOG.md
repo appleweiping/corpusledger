@@ -4,6 +4,9 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add authenticated-manifest `schema` CLI and service export to draft-2020-12
+  JSON Schema with conservative required/type/array metadata.
+
 - Expose snapshot catalog registration, lineage, listing, and diffs through a
   scriptable `catalog` CLI.
 - Add authenticated duplicate-field groups and field-digest filtering to manifest indexes.
