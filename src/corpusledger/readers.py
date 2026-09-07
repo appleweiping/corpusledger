@@ -65,7 +65,8 @@ def _id_text(raw: Any, *, source: str, position: int, policy: CanonicalPolicy) -
         normalized = canonicalize(str(raw), policy)
     except CanonicalizationError as exc:
         raise InputError(f"{source} record {position}: invalid ID: {exc}") from exc
-    assert isinstance(normalized, str)
+    if not isinstance(normalized, str):
+        raise InputError(f"{source} record {position}: normalized ID is not text")
     if not normalized:
         raise InputError(f"{source} record {position}: ID must not be empty")
     return normalized

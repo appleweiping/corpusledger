@@ -365,7 +365,8 @@ def build_manifest(
         schema.observe(normalized)
         findings.extend(scan_record(record.record_id, normalized, privacy))
         order_hasher.add(record.record_id)
-        assert file_hasher is not None
+        if file_hasher is None:
+            raise ManifestError(f"missing file hash state for {record.source}")
         file_hasher.add({"id": record.record_id, "record": canonical_json(normalized, policy)})
     finish_file()
 
