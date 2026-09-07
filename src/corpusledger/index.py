@@ -42,6 +42,22 @@ class IndexRecord:
         }
 
 
+@dataclass(frozen=True)
+class DuplicateFieldGroup:
+    """Records sharing one authenticated field digest."""
+
+    field_path: str
+    field_hash: str
+    record_ids: tuple[str, ...]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "field_path": self.field_path,
+            "field_hash": self.field_hash,
+            "record_ids": list(self.record_ids),
+        }
+
+
 class ManifestIndex:
     """Read-only query interface for a digest-bound manifest index.
 
@@ -183,6 +199,7 @@ class ManifestIndex:
         id_prefix: str | None = None,
         source: str | None = None,
         field_path: str | None = None,
+        field_hash: str | None = None,
         limit: int = 100,
     ) -> tuple[IndexRecord, ...]:
         """Return deterministic bounded rows matching optional metadata filters."""
@@ -190,7 +207,12 @@ class ManifestIndex:
         self._ensure_open()
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10000:
             raise ValueError("limit must be an integer between 1 and 10000")
-        for name, value in (("id_prefix", id_prefix), ("source", source), ("field_path", field_path)):
+        for name, value in (
+            ("id_prefix", id_prefix),
+            ("source", source),
+            ("field_path", field_path),
+            ("field_hash", field_hash),
+        ):
             if value is not None and (not isinstance(value, str) or not value):
                 raise ValueError(f"{name} must be a non-empty string when provided")
         clauses: list[str] = []
@@ -206,6 +228,11 @@ class ManifestIndex:
             join = " JOIN fields f ON f.record_id = r.record_id"
             clauses.append("f.path = ?")
             parameters.append(field_path)
+        elif field_hash is not None:
+            join = " JOIN fields f ON f.record_id = r.record_id"
+        if field_hash is not None:
+            clauses.append("f.field_hash = ?")
+            parameters.append(field_hash)
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         rows = self._connection.execute(
             f"SELECT DISTINCT r.record_id,r.record_hash,r.source,r.position FROM records r{join}{where} "  # nosec B608 - fragments are fixed clauses; values stay parameterized.
@@ -213,6 +240,35 @@ class ManifestIndex:
             (*parameters, limit),
         )
         return tuple(self._record(row) for row in rows)
+
+    def duplicate_fields(self, *, field_path: str | None = None, limit: int = 100) -> tuple[DuplicateFieldGroup, ...]:
+        """Return bounded groups of equal field digests, excluding uniques."""
+
+        self._ensure_open()
+        if field_path is not None and (not isinstance(field_path, str) or not field_path):
+            raise ValueError("field_path must be a non-empty string when provided")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10_000:
+            raise ValueError("limit must be an integer between 1 and 10000")
+        if field_path is None:
+            rows = self._connection.execute(
+                "SELECT path,field_hash,GROUP_CONCAT(record_id) FROM fields "
+                "GROUP BY path,field_hash HAVING COUNT(*) > 1 "
+                "ORDER BY path,field_hash LIMIT ?",
+                (limit,),
+            )
+        else:
+            rows = self._connection.execute(
+                "SELECT path,field_hash,GROUP_CONCAT(record_id) FROM fields WHERE path = ? "
+                "GROUP BY path,field_hash HAVING COUNT(*) > 1 "
+                "ORDER BY path,field_hash LIMIT ?",
+                (field_path, limit),
+            )
+        return tuple(
+            DuplicateFieldGroup(
+                str(path), str(field_hash), tuple(sorted(str(record) for record in str(ids).split(",")))
+            )
+            for path, field_hash, ids in rows
+        )
 
     def _record(self, row: tuple[object, ...]) -> IndexRecord:
         fields = self._connection.execute("SELECT path FROM fields WHERE record_id=? ORDER BY path", (row[0],))

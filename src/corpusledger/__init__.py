@@ -4,7 +4,7 @@ from .canonical import CANONICAL_VERSION, CanonicalPolicy, canonical_bytes, cano
 from .catalog import SnapshotCatalog, SnapshotRef
 from .diff import CorpusDiff, compare
 from .errors import InputError
-from .index import INDEX_FORMAT, IndexRecord, ManifestIndex
+from .index import INDEX_FORMAT, DuplicateFieldGroup, IndexRecord, ManifestIndex
 from .manifest import MANIFEST_FORMAT, Manifest, build_manifest
 from .pipeline import PipelineReport, PipelineStep, drop_fields, rename_field, run_pipeline, select_fields
 from .plan import PLAN_FORMAT, PipelinePlan, PlanStep, load_pipeline_plan
@@ -40,6 +40,7 @@ __all__ = [
     "CanonicalPolicy",
     "CorpusDiff",
     "CorpusService",
+    "DuplicateFieldGroup",
     "GarbageCollectionReport",
     "IndexRecord",
     "InputError",

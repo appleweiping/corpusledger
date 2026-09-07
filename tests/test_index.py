@@ -54,6 +54,9 @@ def test_manifest_index_detects_manifest_mismatch_and_bad_filters(tmp_path: Path
             index.query(id_prefix="")
         with pytest.raises(ValueError, match="field_path"):
             index.query(field_path="")
+        with pytest.raises(ValueError, match="field_hash"):
+            index.query(field_hash="")
+        assert [row.record_id for row in index.query(field_hash=manifest.records[0].field_hashes["/text"])] == ["alpha"]
     finally:
         index.close()
 
@@ -84,3 +87,27 @@ def test_manifest_index_cli_build_verify_and_query(tmp_path: Path, capsys) -> No
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert [row["record_id"] for row in payload["records"]] == ["alpha", "beta"]
     assert "manifest_digest" in capsys.readouterr().out
+
+
+def test_duplicate_field_groups_are_authenticated_and_cli_visible(tmp_path: Path) -> None:
+    source = tmp_path / "duplicates.jsonl"
+    source.write_text(
+        "\n".join(json.dumps({"id": identifier, "text": "same"}) for identifier in ("alpha", "beta", "gamma")) + "\n",
+        encoding="utf-8",
+    )
+    manifest = build_manifest(source)
+    path = tmp_path / "index.db"
+    with ManifestIndex.build(manifest, path) as index:
+        groups = index.duplicate_fields(field_path="/text")
+        assert len(groups) == 1
+        assert groups[0].record_ids == ("alpha", "beta", "gamma")
+        assert groups[0].to_dict()["field_path"] == "/text"
+        digest = groups[0].field_hash
+        assert [item.record_id for item in index.query(field_hash=digest)] == [
+            "alpha",
+            "beta",
+            "gamma",
+        ]
+    output = tmp_path / "duplicates.json"
+    assert run(["duplicate-fields", str(path), "--field", "/text", "--output", str(output)]) == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["groups"][0]["field_hash"] == digest

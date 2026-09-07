@@ -71,8 +71,14 @@ def _parser() -> argparse.ArgumentParser:
     query_index.add_argument("--id-prefix")
     query_index.add_argument("--source")
     query_index.add_argument("--field")
+    query_index.add_argument("--field-hash")
     query_index.add_argument("--limit", type=int, default=100)
     query_index.add_argument("--output")
+    duplicates = subparsers.add_parser("duplicate-fields", help="find repeated authenticated field values in an index")
+    duplicates.add_argument("index")
+    duplicates.add_argument("--field")
+    duplicates.add_argument("--limit", type=int, default=100)
+    duplicates.add_argument("--output")
 
     sign = subparsers.add_parser("sign", help="create a detached Ed25519 signature")
     sign.add_argument("manifest")
@@ -202,9 +208,19 @@ def run(argv: list[str] | None = None) -> int:
                 id_prefix=args.id_prefix,
                 source=args.source,
                 field_path=args.field,
+                field_hash=args.field_hash,
                 limit=args.limit,
             )
             payload = {"index": manifest_index.stats(), "records": [row.to_dict() for row in rows]}
+        _write_report(json.dumps(payload, indent=2, sort_keys=True) + "\n", args.output)
+        return 0
+    if args.command == "duplicate-fields":
+        with ManifestIndex(args.index) as manifest_index:
+            groups = manifest_index.duplicate_fields(field_path=args.field, limit=args.limit)
+            payload = {
+                "index": manifest_index.stats(),
+                "groups": [group.to_dict() for group in groups],
+            }
         _write_report(json.dumps(payload, indent=2, sort_keys=True) + "\n", args.output)
         return 0
     if args.command == "bundle":
