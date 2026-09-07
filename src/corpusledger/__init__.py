@@ -1,6 +1,7 @@
 """CorpusLedger: reproducible manifests and diffs for JSON NLP corpora."""
 
 from .canonical import CANONICAL_VERSION, CanonicalPolicy, canonical_bytes, canonical_json, canonicalize
+from .catalog import SnapshotCatalog, SnapshotRef
 from .diff import CorpusDiff, compare
 from .errors import InputError
 from .manifest import MANIFEST_FORMAT, Manifest, build_manifest
@@ -29,6 +30,8 @@ __all__ = [
     "ReaderAdapter",
     "Record",
     "SignatureEnvelope",
+    "SnapshotCatalog",
+    "SnapshotRef",
     "build_manifest",
     "canonical_bytes",
     "canonical_json",
