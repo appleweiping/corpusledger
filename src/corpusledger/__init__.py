@@ -24,6 +24,7 @@ from .store import (
     extract_bundle,
     verify_bundle,
 )
+from .stream import NdjsonGateway, StreamReport
 
 __all__ = [
     "CANONICAL_VERSION",
@@ -38,6 +39,7 @@ __all__ = [
     "GarbageCollectionReport",
     "InputError",
     "Manifest",
+    "NdjsonGateway",
     "ObjectStore",
     "PipelineReport",
     "PipelineStep",
@@ -47,6 +49,7 @@ __all__ = [
     "SignatureEnvelope",
     "SnapshotCatalog",
     "SnapshotRef",
+    "StreamReport",
     "build_manifest",
     "bundle_snapshot",
     "canonical_bytes",
