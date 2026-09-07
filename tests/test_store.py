@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from corpusledger import ObjectStore, build_manifest, bundle_snapshot
+from corpusledger import ObjectStore, build_manifest, bundle_snapshot, extract_bundle, verify_bundle
 
 
 def source(tmp_path: Path) -> Path:
@@ -39,3 +39,29 @@ def test_bundle_rejects_missing_source_file(tmp_path: Path) -> None:
     corpus.unlink()
     with pytest.raises(FileNotFoundError):
         bundle_snapshot(manifest, corpus, tmp_path / "bundle.zip")
+
+
+def test_bundle_verification_and_safe_extraction(tmp_path: Path) -> None:
+    corpus = source(tmp_path)
+    manifest = build_manifest(corpus)
+    bundle = tmp_path / "bundle.zip"
+    report = bundle_snapshot(manifest, corpus, bundle)
+    verified = verify_bundle(bundle, expected_archive_digest=report.archive_digest)
+    assert verified.archive_digest == report.archive_digest
+    assert verified.files == report.files
+    extracted = tmp_path / "out"
+    extracted_report = extract_bundle(bundle, extracted)
+    assert extracted_report == verified
+    assert (extracted / "manifest.json").is_file()
+    assert (extracted / "source" / "corpus.jsonl").read_text(encoding="utf-8") == corpus.read_text(encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        extract_bundle(bundle, extracted)
+
+
+def test_bundle_verification_rejects_wrong_digest(tmp_path: Path) -> None:
+    corpus = source(tmp_path)
+    bundle = tmp_path / "bundle.zip"
+    report = bundle_snapshot(build_manifest(corpus), corpus, bundle)
+    with pytest.raises(ValueError, match="digest"):
+        verify_bundle(bundle, expected_archive_digest="0" * 64)
+    assert report.bytes == bundle.stat().st_size

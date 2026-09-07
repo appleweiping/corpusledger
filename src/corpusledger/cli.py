@@ -22,7 +22,7 @@ from .privacy import PrivacyConfig
 from .readers import ReaderAdapter, load_reader_adapter
 from .reporting import render
 from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
-from .store import ObjectStore, bundle_snapshot
+from .store import ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -75,6 +75,13 @@ def _parser() -> argparse.ArgumentParser:
     bundle.add_argument("output")
     bundle.add_argument("--input", help="override the source path recorded in the manifest")
     bundle.add_argument("--store", help="optional SHA-256 object-store directory")
+    bundle_verify = subparsers.add_parser("verify-bundle", help="authenticate a snapshot ZIP")
+    bundle_verify.add_argument("bundle")
+    bundle_verify.add_argument("--digest")
+    bundle_extract = subparsers.add_parser("extract-bundle", help="verify and safely extract a snapshot ZIP")
+    bundle_extract.add_argument("bundle")
+    bundle_extract.add_argument("destination")
+    bundle_extract.add_argument("--overwrite", action="store_true")
     return parser
 
 
@@ -131,6 +138,34 @@ def run(argv: list[str] | None = None) -> int:
                     "manifest_digest": report.manifest_digest,
                     "files": list(report.files),
                     "bytes": report.bytes,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.command == "verify-bundle":
+        verification = verify_bundle(args.bundle, expected_archive_digest=args.digest)
+        print(
+            json.dumps(
+                {
+                    "archive_digest": verification.archive_digest,
+                    "manifest_digest": verification.manifest_digest,
+                    "files": list(verification.files),
+                    "bytes": verification.bytes,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.command == "extract-bundle":
+        verification = extract_bundle(args.bundle, args.destination, overwrite=args.overwrite)
+        print(
+            json.dumps(
+                {
+                    "archive_digest": verification.archive_digest,
+                    "manifest_digest": verification.manifest_digest,
+                    "files": list(verification.files),
+                    "bytes": verification.bytes,
                 },
                 sort_keys=True,
             )

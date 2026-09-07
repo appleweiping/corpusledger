@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import tempfile
 import zipfile
@@ -116,6 +117,16 @@ class BundleReport:
     bytes: int
 
 
+@dataclass(frozen=True, slots=True)
+class BundleVerification:
+    """Authenticated inventory of a snapshot archive."""
+
+    archive_digest: str
+    manifest_digest: str
+    files: tuple[str, ...]
+    bytes: int
+
+
 def bundle_snapshot(
     manifest: Manifest,
     source: str | Path,
@@ -173,3 +184,84 @@ def bundle_snapshot(
         tuple(name for name, _ in files),
         len(payload),
     )
+
+
+def verify_bundle(bundle: str | Path, *, expected_archive_digest: str | None = None) -> BundleVerification:
+    """Verify archive structure, manifest identity, and safe member names.
+
+    Verification is independent of the source filesystem: it authenticates the
+    exact bytes shipped in a bundle and checks that every manifest file has a
+    corresponding ``source/`` member. Duplicate members, path traversal, and
+    symbolic-link entries are rejected before extraction.
+    """
+
+    bundle_path = Path(bundle)
+    try:
+        archive_bytes = bundle_path.read_bytes()
+    except (OSError, UnicodeError) as error:
+        raise ValueError(f"cannot read bundle {bundle_path}: {error}") from error
+    archive_digest = _digest(archive_bytes)
+    if expected_archive_digest is not None and archive_digest != _check_digest(expected_archive_digest):
+        raise ValueError("bundle archive digest does not match expected digest")
+    try:
+        archive = zipfile.ZipFile(bundle_path)
+    except (OSError, zipfile.BadZipFile) as error:
+        raise ValueError(f"invalid bundle archive {bundle_path}: {error}") from error
+    with archive:
+        infos = archive.infolist()
+        names = [info.filename for info in infos]
+        if len(names) != len(set(names)):
+            raise ValueError("bundle contains duplicate member names")
+        for info in infos:
+            name = info.filename.replace("\\", "/")
+            if name != info.filename or name.startswith("/") or any(part == ".." for part in name.split("/")):
+                raise ValueError(f"unsafe bundle member path: {info.filename!r}")
+            if info.is_dir() or (info.external_attr >> 16) & 0o170000 == 0o120000:
+                raise ValueError(f"bundle member is not a regular file: {info.filename!r}")
+        if "manifest.json" not in names:
+            raise ValueError("bundle is missing manifest.json")
+        manifest_bytes = archive.read("manifest.json")
+        manifest_digest = _digest(manifest_bytes)
+        try:
+            manifest = json.loads(manifest_bytes.decode("utf-8"))
+        except (UnicodeError, json.JSONDecodeError) as error:
+            raise ValueError("bundle manifest.json is not valid UTF-8 JSON") from error
+        if not isinstance(manifest, dict) or manifest.get("format") != "corpusledger/1":
+            raise ValueError("bundle manifest has an unsupported format")
+        files = manifest.get("files")
+        if not isinstance(files, dict) or not all(isinstance(name, str) for name in files):
+            raise ValueError("bundle manifest files must be an object")
+        expected = {f"source/{name}" for name in files}
+        actual = {name for name in names if name.startswith("source/")}
+        if actual != expected:
+            missing = sorted(expected - actual)
+            extra = sorted(actual - expected)
+            detail = []
+            if missing:
+                detail.append("missing " + ", ".join(missing))
+            if extra:
+                detail.append("unexpected " + ", ".join(extra))
+            raise ValueError("bundle source inventory mismatch (" + "; ".join(detail) + ")")
+        return BundleVerification(archive_digest, manifest_digest, tuple(names), len(archive_bytes))
+
+
+def extract_bundle(bundle: str | Path, destination: str | Path, *, overwrite: bool = False) -> BundleVerification:
+    """Safely extract a verified bundle and return its authentication report."""
+
+    verification = verify_bundle(bundle)
+    target = Path(destination).resolve()
+    target.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(bundle) as archive:
+        for info in archive.infolist():
+            output = (target / info.filename).resolve()
+            try:
+                output.relative_to(target)
+            except ValueError as error:
+                raise ValueError(f"bundle member escapes extraction root: {info.filename!r}") from error
+            if output.exists() and not overwrite:
+                raise FileExistsError(output)
+            output.parent.mkdir(parents=True, exist_ok=True)
+            temporary = output.with_name(f".{output.name}.tmp")
+            temporary.write_bytes(archive.read(info.filename))
+            os.replace(temporary, output)
+    return verification

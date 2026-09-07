@@ -14,7 +14,7 @@ from .signing import (
     sign_manifest,
     verify_manifest_signature,
 )
-from .store import BundleReport, ObjectStore, bundle_snapshot
+from .store import BundleReport, BundleVerification, ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
 
 __all__ = [
     "CANONICAL_VERSION",
@@ -22,6 +22,7 @@ __all__ = [
     "READER_ENTRY_POINT_GROUP",
     "SIGNATURE_FORMAT",
     "BundleReport",
+    "BundleVerification",
     "CanonicalPolicy",
     "CorpusDiff",
     "InputError",
@@ -42,12 +43,14 @@ __all__ = [
     "canonicalize",
     "compare",
     "drop_fields",
+    "extract_bundle",
     "iter_corpus",
     "load_reader_adapter",
     "rename_field",
     "run_pipeline",
     "select_fields",
     "sign_manifest",
+    "verify_bundle",
     "verify_manifest_signature",
 ]
 

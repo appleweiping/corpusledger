@@ -16,3 +16,15 @@ print(report.archive_digest, report.manifest_digest)
 The bundle is a transport artifact, not a replacement for manifest verification:
 consumers should load `manifest.json`, verify its digest/signature when available,
 then rebuild against the extracted source files.
+
+`verify_bundle` authenticates the archive bytes, rejects duplicate or traversal
+members, and checks that the manifest inventory matches every `source/` member.
+`extract_bundle` performs that verification before writing and refuses to
+overwrite existing files unless `overwrite=True`.
+
+```python
+from corpusledger import extract_bundle, verify_bundle
+
+verified = verify_bundle("artifacts/snapshot.zip", expected_archive_digest=report.archive_digest)
+extract_bundle("artifacts/snapshot.zip", "artifacts/unpacked")
+```

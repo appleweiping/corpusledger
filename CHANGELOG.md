@@ -10,6 +10,7 @@ All notable changes follow the principles of Keep a Changelog.
   failure-safe output replacement, and resumable provenance checkpoints.
 - Transactional snapshot catalog with named versions, parent lineage, and manifest diffs.
 - SHA-256 object storage and deterministic ZIP snapshot bundles.
+- Authenticated bundle verification and path-safe extraction, exposed through dedicated CLI commands.
 
 ## [0.2.0] - 2026-08-31
 
