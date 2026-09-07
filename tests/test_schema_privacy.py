@@ -3,7 +3,7 @@ import math
 import pytest
 
 from corpusledger.privacy import PrivacyConfig, scan_records, shannon_entropy
-from corpusledger.schema import infer_schema, schema_drift, to_json_schema
+from corpusledger.schema import infer_schema, schema_drift, to_json_schema, validate_json_schema
 
 
 def test_schema_is_conservative_and_summarizes_collections() -> None:
@@ -86,6 +86,60 @@ def test_schema_export_validates_titles_ids_and_path_collisions() -> None:
             to_json_schema(valid, **kwargs)
     with pytest.raises(ValueError, match="invalid"):
         to_json_schema({"record_count": 1, "fields": {"//x": {"types": ["string"]}}})
+
+
+def test_schema_validation_reports_nested_paths_and_bounds() -> None:
+    schema = {
+        "type": "object",
+        "required": ["id", "tags"],
+        "properties": {
+            "id": {"type": "string", "minLength": 2},
+            "tags": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        },
+        "additionalProperties": False,
+    }
+    issues = validate_json_schema(
+        [{"id": "a", "tags": ["ok"]}, {"id": "bb", "tags": [1], "extra": True}],
+        schema,
+    )
+    assert [(item.record, item.path) for item in issues] == [(1, "/id"), (2, "/tags/0"), (2, "/extra")]
+    assert validate_json_schema([{"id": "ok", "tags": ["x"]}], schema) == ()
+
+
+def test_schema_validation_supports_combinators_and_error_limit() -> None:
+    schema = {"anyOf": [{"type": "string"}, {"type": "integer"}]}
+    assert validate_json_schema(["ok", 3], schema) == ()
+    assert len(validate_json_schema([True, False], schema, max_errors=1)) == 1
+    with pytest.raises(ValueError, match="max_errors"):
+        validate_json_schema([], schema, max_errors=0)
+
+
+def test_schema_validation_covers_scalar_constraints_and_schema_booleans() -> None:
+    assert validate_json_schema([{"x": 1}], True) == ()
+    false_errors = validate_json_schema([{"x": 1}, None], False)
+    assert len(false_errors) == 2 and false_errors[0].message == "schema is false"
+    with pytest.raises(TypeError, match="object or boolean"):
+        validate_json_schema([], "bad")  # type: ignore[arg-type]
+    schema = {
+        "type": ["string", "integer"],
+        "allOf": [{"anyOf": [{"type": "string"}, {"type": "integer"}]}],
+        "enum": ["ok", 3],
+        "const": "ok",
+        "minLength": 2,
+        "maxLength": 4,
+        "pattern": "^[a-z]+$",
+        "minimum": 1,
+        "maximum": 3,
+    }
+    assert validate_json_schema(["ok"], schema) == ()
+    findings = validate_json_schema(["", "TOOLONG", 5, True], schema)
+    assert {item.path for item in findings} == {""}
+    nested = {
+        "type": "object",
+        "properties": {"x": {"type": "integer"}},
+        "additionalProperties": {"type": "string"},
+    }
+    assert validate_json_schema([{"x": 1, "extra": 2}], nested)[0].path == "/extra"
 
 
 def test_privacy_scan_redacts_values() -> None:

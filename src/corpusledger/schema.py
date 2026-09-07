@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -237,3 +238,136 @@ def _summary_schema(summary: Mapping[str, Any]) -> dict[str, Any]:
                 raise ValueError(f"schema {key} must be a non-negative integer")
             result["minItems" if key == "min_items" else "maxItems"] = value
     return result
+
+
+@dataclass(frozen=True, slots=True)
+class SchemaValidationIssue:
+    """One deterministic JSON Schema subset validation finding."""
+
+    record: int
+    path: str
+    message: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"record": self.record, "path": self.path, "message": self.message}
+
+
+def validate_json_schema(
+    values: Iterable[Any], schema: Mapping[str, Any] | bool, *, max_errors: int = 100
+) -> tuple[SchemaValidationIssue, ...]:
+    """Validate records against a dependency-free, useful draft-schema subset.
+
+    Supported keywords are ``type``, ``enum``, ``const``, ``required``,
+    ``properties``, ``additionalProperties: false``, ``items``, array size,
+    string length/pattern, numeric bounds, ``anyOf`` and ``allOf``. Unknown
+    keywords are ignored, which keeps this validator conservative and makes it
+    suitable for checking schemas produced by :func:`to_json_schema`.
+    """
+
+    if isinstance(schema, bool):
+        if schema:
+            return ()
+        return tuple(SchemaValidationIssue(index, "", "schema is false") for index, _ in enumerate(values, start=1))
+    if not isinstance(schema, Mapping):
+        raise TypeError("JSON Schema must be an object or boolean")
+    if isinstance(max_errors, bool) or not isinstance(max_errors, int) or max_errors < 1:
+        raise ValueError("max_errors must be a positive integer")
+    issues: list[SchemaValidationIssue] = []
+    for index, value in enumerate(values, start=1):
+        for path, message in _validate_value(value, schema, ""):
+            issues.append(SchemaValidationIssue(index, path, message))
+            if len(issues) >= max_errors:
+                return tuple(issues)
+    return tuple(issues)
+
+
+def _validate_value(value: Any, schema: Mapping[str, Any], path: str) -> tuple[tuple[str, str], ...]:
+    findings: list[tuple[str, str]] = []
+    expected = schema.get("type")
+    if expected is not None and not _matches_type(value, expected):
+        return ((path, f"expected type {expected!r}, got {value_type(value)!r}"),)
+    if "const" in schema and value != schema["const"]:
+        findings.append((path, "value does not match const"))
+    enum = schema.get("enum")
+    if enum is not None and (not isinstance(enum, list) or value not in enum):
+        findings.append((path, "value is not in enum"))
+    any_of = schema.get("anyOf")
+    if (
+        isinstance(any_of, list)
+        and any_of
+        and not any(isinstance(option, Mapping) and not _validate_value(value, option, path) for option in any_of)
+    ):
+        findings.append((path, "value does not match anyOf"))
+    all_of = schema.get("allOf")
+    if isinstance(all_of, list):
+        for option in all_of:
+            if isinstance(option, Mapping):
+                findings.extend(_validate_value(value, option, path))
+    if isinstance(value, dict):
+        required = schema.get("required", [])
+        if isinstance(required, list):
+            for name in required:
+                if isinstance(name, str) and name not in value:
+                    findings.append((_child_path(path, name), "required property is missing"))
+        properties = schema.get("properties", {})
+        if not isinstance(properties, Mapping):
+            properties = {}
+        additional = schema.get("additionalProperties", True)
+        for name, item in value.items():
+            child = _child_path(path, str(name))
+            if name in properties and isinstance(properties[name], Mapping):
+                findings.extend(_validate_value(item, properties[name], child))
+            elif additional is False:
+                findings.append((child, "additional property is not allowed"))
+            elif isinstance(additional, Mapping):
+                findings.extend(_validate_value(item, additional, child))
+    elif isinstance(value, list):
+        minimum = schema.get("minItems")
+        maximum = schema.get("maxItems")
+        if isinstance(minimum, int) and len(value) < minimum:
+            findings.append((path, f"array has fewer than {minimum} items"))
+        if isinstance(maximum, int) and len(value) > maximum:
+            findings.append((path, f"array has more than {maximum} items"))
+        item_schema = schema.get("items")
+        if isinstance(item_schema, Mapping):
+            for index, item in enumerate(value):
+                findings.extend(_validate_value(item, item_schema, _child_path(path, str(index))))
+    elif isinstance(value, str):
+        minimum = schema.get("minLength")
+        maximum = schema.get("maxLength")
+        if isinstance(minimum, int) and len(value) < minimum:
+            findings.append((path, f"string is shorter than {minimum} characters"))
+        if isinstance(maximum, int) and len(value) > maximum:
+            findings.append((path, f"string is longer than {maximum} characters"))
+        pattern = schema.get("pattern")
+        if isinstance(pattern, str) and re.search(pattern, value) is None:
+            findings.append((path, "string does not match pattern"))
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        minimum = schema.get("minimum")
+        maximum = schema.get("maximum")
+        if isinstance(minimum, (int, float)) and value < minimum:
+            findings.append((path, f"number is below minimum {minimum}"))
+        if isinstance(maximum, (int, float)) and value > maximum:
+            findings.append((path, f"number is above maximum {maximum}"))
+    return tuple(findings)
+
+
+def _matches_type(value: Any, expected: Any) -> bool:
+    expected_types = [expected] if isinstance(expected, str) else expected
+    if not isinstance(expected_types, list) or not all(isinstance(item, str) for item in expected_types):
+        return False
+    return any(
+        (kind == "null" and value is None)
+        or (kind == "boolean" and isinstance(value, bool))
+        or (kind == "integer" and isinstance(value, int) and not isinstance(value, bool))
+        or (kind == "number" and isinstance(value, (int, float)) and not isinstance(value, bool))
+        or (kind == "string" and isinstance(value, str))
+        or (kind == "array" and isinstance(value, list))
+        or (kind == "object" and isinstance(value, dict))
+        for kind in expected_types
+    )
+
+
+def _child_path(path: str, part: str) -> str:
+    escaped = part.replace("~", "~0").replace("/", "~1")
+    return f"{path}/{escaped}"

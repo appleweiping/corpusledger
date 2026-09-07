@@ -4,6 +4,9 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add bounded-memory `schema-validate` corpus checks for a documented,
+  dependency-free JSON Schema subset.
+
 - Add authenticated-manifest `schema` CLI and service export to draft-2020-12
   JSON Schema with conservative required/type/array metadata.
 

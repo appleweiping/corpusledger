@@ -87,6 +87,30 @@ def test_service_exports_manifest_schema(tmp_path) -> None:
     assert result["schema"]["properties"]["meta"]["properties"]["lang"]["type"] == "string"
 
 
+def test_cli_schema_validation_and_service_shape(tmp_path, capsys) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"a","score":1}\n{"id":"b","score":"bad"}\n', encoding="utf-8")
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text(
+        json.dumps({"type": "object", "required": ["score"], "properties": {"score": {"type": "number"}}}),
+        encoding="utf-8",
+    )
+    from corpusledger.cli import run
+
+    assert run(["schema-validate", str(source), str(schema_path)]) == 2
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["records_checked"] == 2
+    assert payload["errors"][0]["path"] == "/score"
+    service_payload = CorpusService().dispatch(
+        {
+            "operation": "schema_validate",
+            "input": str(source),
+            "schema": str(schema_path),
+        }
+    )
+    assert service_payload["valid"] is False
+
+
 def test_service_catalog_operations_are_typed_and_lineage_aware(tmp_path) -> None:
     first_source = tmp_path / "first.jsonl"
     second_source = tmp_path / "second.jsonl"

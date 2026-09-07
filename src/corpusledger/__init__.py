@@ -10,7 +10,7 @@ from .pipeline import PipelineReport, PipelineStep, drop_fields, rename_field, r
 from .plan import PLAN_FORMAT, PipelinePlan, PlanStep, load_pipeline_plan
 from .privacy import PrivacyConfig
 from .readers import READER_ENTRY_POINT_GROUP, ReaderAdapter, Record, iter_corpus, load_reader_adapter
-from .schema import to_json_schema
+from .schema import SchemaValidationIssue, to_json_schema, validate_json_schema
 from .service import CorpusService, create_server
 from .signing import (
     SIGNATURE_FORMAT,
@@ -56,6 +56,7 @@ __all__ = [
     "PrivacyConfig",
     "ReaderAdapter",
     "Record",
+    "SchemaValidationIssue",
     "SignatureEnvelope",
     "SnapshotCatalog",
     "SnapshotRef",
@@ -77,6 +78,7 @@ __all__ = [
     "select_fields",
     "sign_manifest",
     "to_json_schema",
+    "validate_json_schema",
     "verify_bundle",
     "verify_manifest_signature",
 ]

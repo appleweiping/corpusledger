@@ -6,7 +6,7 @@ import argparse
 import json
 import os
 import sys
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -25,9 +25,9 @@ from .manifest import Manifest, build_manifest
 from .pipeline import drop_fields, rename_field, run_pipeline, select_fields
 from .plan import load_pipeline_plan
 from .privacy import PrivacyConfig
-from .readers import ReaderAdapter, load_reader_adapter
+from .readers import ReaderAdapter, iter_corpus, load_reader_adapter
 from .reporting import render
-from .schema import to_json_schema
+from .schema import to_json_schema, validate_json_schema
 from .service import create_server
 from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
 from .store import ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
@@ -57,6 +57,14 @@ def _parser() -> argparse.ArgumentParser:
     schema_export.add_argument("--title")
     schema_export.add_argument("--id", dest="schema_id")
     schema_export.add_argument("--output")
+    schema_validate = subparsers.add_parser(
+        "schema-validate", help="validate corpus records against a JSON Schema subset"
+    )
+    schema_validate.add_argument("input")
+    schema_validate.add_argument("schema")
+    schema_validate.add_argument("--id-field", default="id")
+    schema_validate.add_argument("--max-errors", type=int, default=100)
+    schema_validate.add_argument("--output")
 
     difference = subparsers.add_parser("diff", help="compare two manifests")
     difference.add_argument("before")
@@ -269,6 +277,32 @@ def run(argv: list[str] | None = None) -> int:
         payload = to_json_schema(manifest.schema, title=args.title, schema_id=args.schema_id)
         _write_report(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", args.output)
         return 0
+    if args.command == "schema-validate":
+        input_path = Path(args.input).resolve()
+        schema_path = Path(args.schema).resolve()
+        if not schema_path.is_file():
+            raise InputError(f"schema does not exist: {schema_path}")
+        try:
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise InputError(f"cannot read schema {schema_path}: {exc}") from exc
+        records_checked = 0
+
+        def values() -> Iterator[dict[str, Any]]:
+            nonlocal records_checked
+            for record in iter_corpus(input_path, id_field=args.id_field):
+                records_checked += 1
+                yield record.data
+
+        issues = validate_json_schema(values(), schema, max_errors=args.max_errors)
+        payload = {
+            "valid": not issues,
+            "records_checked": records_checked,
+            "errors": [item.to_dict() for item in issues],
+        }
+        rendered = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        _write_report(rendered, args.output)
+        return 0 if not issues else 2
     if args.command == "index":
         manifest_path = Path(args.manifest).resolve()
         output_path = Path(args.output).resolve()

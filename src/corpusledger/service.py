@@ -8,7 +8,7 @@ pipelines, not an Internet-facing multi-tenant server.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,7 +17,8 @@ from typing import Any
 from .catalog import SnapshotCatalog
 from .diff import compare
 from .manifest import Manifest, build_manifest
-from .schema import to_json_schema
+from .readers import iter_corpus
+from .schema import to_json_schema, validate_json_schema
 from .store import verify_bundle
 
 
@@ -62,9 +63,37 @@ class CorpusService:
                 "operation": operation,
                 "schema": to_json_schema(manifest.schema, title=title, schema_id=schema_id),
             }
+        if operation == "schema_validate":
+            source = _required_path(request, "input")
+            schema_value = request.get("schema")
+            if isinstance(schema_value, str):
+                try:
+                    schema_value = json.loads(Path(schema_value).read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(f"cannot read schema: {exc}") from exc
+            if not isinstance(schema_value, (Mapping, bool)):
+                raise ValueError("schema must be an object, boolean, or path string")
+            max_errors = request.get("max_errors", 100)
+            if isinstance(max_errors, bool) or not isinstance(max_errors, int):
+                raise ValueError("max_errors must be an integer")
+            checked = 0
+
+            def values() -> Iterator[dict[str, Any]]:
+                nonlocal checked
+                for record in iter_corpus(source):
+                    checked += 1
+                    yield record.data
+
+            issues = validate_json_schema(values(), schema_value, max_errors=max_errors)
+            return {
+                "operation": operation,
+                "valid": not issues,
+                "records_checked": checked,
+                "errors": [item.to_dict() for item in issues],
+            }
         if operation == "catalog":
             return _catalog_request(request)
-        raise ValueError("operation must be one of: manifest, diff, verify_bundle, schema, catalog")
+        raise ValueError("operation must be one of: manifest, diff, verify_bundle, schema, schema_validate, catalog")
 
 
 def create_server(
