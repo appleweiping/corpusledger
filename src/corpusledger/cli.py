@@ -20,6 +20,7 @@ from .errors import (
     SignatureVerificationError,
 )
 from .manifest import Manifest, build_manifest
+from .pipeline import drop_fields, rename_field, run_pipeline, select_fields
 from .privacy import PrivacyConfig
 from .readers import ReaderAdapter, load_reader_adapter
 from .reporting import render
@@ -115,6 +116,15 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="return status 2 when any input line produces an error response",
     )
+    pipeline = subparsers.add_parser("pipeline", help="run a resumable deterministic record pipeline")
+    pipeline.add_argument("input")
+    pipeline.add_argument("output")
+    pipeline.add_argument("--id-field", default="id")
+    pipeline.add_argument("--select", action="append", default=[], help="comma-separated fields to keep")
+    pipeline.add_argument("--drop", action="append", default=[], help="comma-separated fields to drop")
+    pipeline.add_argument("--rename", action="append", default=[], help="rename OLD=NEW (repeatable)")
+    pipeline.add_argument("--state", help="checkpoint path (default: OUTPUT.state.json)")
+    pipeline.add_argument("--resume", action="store_true", help="reuse a matching completed checkpoint")
     return parser
 
 
@@ -228,6 +238,36 @@ def run(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "stream":
         return _run_stream(args)
+    if args.command == "pipeline":
+        steps = []
+        for value in args.select:
+            steps.append(select_fields(tuple(part.strip() for part in value.split(","))))
+        for value in args.rename:
+            if value.count("=") != 1:
+                raise InputError("--rename expects OLD=NEW")
+            old, new = (part.strip() for part in value.split("=", 1))
+            steps.append(rename_field(old, new))
+        for value in args.drop:
+            steps.append(drop_fields(tuple(part.strip() for part in value.split(","))))
+        output_path = Path(args.output).resolve()
+        _require_distinct(output_path, Path(args.input).resolve(), message="pipeline output must differ from its input")
+        if args.state:
+            _require_distinct(
+                Path(args.state).resolve(),
+                Path(args.input).resolve(),
+                output_path,
+                message="pipeline state must differ from input and output",
+            )
+        pipeline_report = run_pipeline(
+            args.input,
+            args.output,
+            steps,
+            id_field=args.id_field,
+            state=args.state,
+            resume=args.resume,
+        )
+        print(json.dumps(pipeline_report.to_dict(), sort_keys=True))
+        return 0
     if args.command == "diff":
         if args.output:
             output_path = Path(args.output).resolve()

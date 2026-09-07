@@ -70,6 +70,21 @@ def test_stream_cli_rejects_invalid_line_limit() -> None:
         run(["stream", "--max-line-bytes", "0"])
 
 
+def test_pipeline_cli_runs_and_resumes_with_provenance(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    source = tmp_path / "source.jsonl"
+    output = tmp_path / "derived.jsonl"
+    source.write_text('{"id":"a","text":"A","drop":1}\n', encoding="utf-8")
+    assert run(["pipeline", str(source), str(output), "--select", "id,text", "--rename", "text=content"]) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first["records"] == 1 and first["resumed"] is False
+    assert output.read_text(encoding="utf-8") == '{"content":"A","id":"a"}\n'
+    assert (
+        run(["pipeline", str(source), str(output), "--select", "id,text", "--rename", "text=content", "--resume"]) == 0
+    )
+    second = json.loads(capsys.readouterr().out)
+    assert second["resumed"] is True
+
+
 def test_bundle_command_writes_reproducible_archive(tmp_path: Path, capsys: object) -> None:
     source = tmp_path / "corpus.jsonl"
     source.write_text('{"id":"a","text":"hello"}\n', encoding="utf-8")

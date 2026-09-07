@@ -9,6 +9,8 @@ All notable changes follow the principles of Keep a Changelog.
   digests, bounded lines, and one structured response per input record.
 - Expose the gateway as a `corpusledger stream` CLI with safe identity/select
   processors, digest reports, and strict failure status handling.
+- Add a resumable `corpusledger pipeline` CLI for deterministic select, rename,
+  and drop transformations with checkpoint provenance.
 
 ### Added
 
