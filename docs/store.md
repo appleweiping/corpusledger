@@ -28,3 +28,9 @@ from corpusledger import extract_bundle, verify_bundle
 verified = verify_bundle("artifacts/snapshot.zip", expected_archive_digest=report.archive_digest)
 extract_bundle("artifacts/snapshot.zip", "artifacts/unpacked")
 ```
+
+Object stores also support a safe garbage-collection plan:
+`collect_unreferenced(keep)` is read-only by default and reports exact bytes;
+pass `dry_run=False` only after the caller has resolved all manifests that must
+remain reachable. The CLI exposes the same operation as `corpusledger gc` and
+requires explicit `--delete` before unlinking anything.

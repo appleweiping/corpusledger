@@ -65,3 +65,15 @@ def test_bundle_verification_rejects_wrong_digest(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="digest"):
         verify_bundle(bundle, expected_archive_digest="0" * 64)
     assert report.bytes == bundle.stat().st_size
+
+
+def test_object_store_garbage_collection_defaults_to_a_plan(tmp_path: Path) -> None:
+    store = ObjectStore(tmp_path / "objects")
+    keep = store.put_bytes(b"keep")
+    remove = store.put_bytes(b"remove")
+    plan = store.collect_unreferenced((keep,))
+    assert plan.kept == (keep,) and plan.removed == (remove,) and store.contains(remove)
+    collected = store.collect_unreferenced((keep,), dry_run=False)
+    assert collected == plan and not store.contains(remove) and store.contains(keep)
+    with pytest.raises(KeyError, match="missing"):
+        store.collect_unreferenced(("0" * 64,))

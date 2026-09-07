@@ -105,6 +105,33 @@ class ObjectStore:
                     values.append(candidate)
         return tuple(values)
 
+    def collect_unreferenced(
+        self, keep: set[str] | frozenset[str] | tuple[str, ...], *, dry_run: bool = True
+    ) -> GarbageCollectionReport:
+        """Plan or remove objects not present in an explicit keep set.
+
+        The default is a read-only plan. When ``dry_run=False`` only validated
+        digest-addressed files below this store's ``objects`` directory are
+        unlinked; manifests and other directories are never touched.
+        """
+        if not isinstance(dry_run, bool):
+            raise TypeError("dry_run must be a boolean")
+        keep_values = tuple(sorted(set(keep)))
+        for digest in keep_values:
+            _check_digest(digest)
+        existing = set(self.digests())
+        unknown = set(keep_values) - existing
+        if unknown:
+            raise KeyError(f"cannot keep missing objects: {', '.join(sorted(unknown))}")
+        removed = tuple(sorted(existing - set(keep_values)))
+        bytes_removed = sum(self.path(digest).stat().st_size for digest in removed)
+        if not dry_run:
+            for digest in removed:
+                self.path(digest).unlink()
+                with suppress(OSError):
+                    self.path(digest).parent.rmdir()
+        return GarbageCollectionReport(keep_values, removed, bytes_removed)
+
 
 @dataclass(frozen=True, slots=True)
 class BundleReport:
@@ -124,6 +151,15 @@ class BundleVerification:
     archive_digest: str
     manifest_digest: str
     files: tuple[str, ...]
+    bytes: int
+
+
+@dataclass(frozen=True, slots=True)
+class GarbageCollectionReport:
+    """Plan/result for removing unreferenced immutable objects."""
+
+    kept: tuple[str, ...]
+    removed: tuple[str, ...]
     bytes: int
 
 

@@ -14,7 +14,15 @@ from .signing import (
     sign_manifest,
     verify_manifest_signature,
 )
-from .store import BundleReport, BundleVerification, ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
+from .store import (
+    BundleReport,
+    BundleVerification,
+    GarbageCollectionReport,
+    ObjectStore,
+    bundle_snapshot,
+    extract_bundle,
+    verify_bundle,
+)
 
 __all__ = [
     "CANONICAL_VERSION",
@@ -25,6 +33,7 @@ __all__ = [
     "BundleVerification",
     "CanonicalPolicy",
     "CorpusDiff",
+    "GarbageCollectionReport",
     "InputError",
     "Manifest",
     "ObjectStore",

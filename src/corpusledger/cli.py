@@ -82,6 +82,10 @@ def _parser() -> argparse.ArgumentParser:
     bundle_extract.add_argument("bundle")
     bundle_extract.add_argument("destination")
     bundle_extract.add_argument("--overwrite", action="store_true")
+    gc = subparsers.add_parser("gc", help="plan or collect unreferenced object-store bytes")
+    gc.add_argument("store")
+    gc.add_argument("--keep", action="append", default=[])
+    gc.add_argument("--delete", action="store_true", help="remove unreferenced objects")
     return parser
 
 
@@ -166,6 +170,20 @@ def run(argv: list[str] | None = None) -> int:
                     "manifest_digest": verification.manifest_digest,
                     "files": list(verification.files),
                     "bytes": verification.bytes,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    if args.command == "gc":
+        gc_report = ObjectStore(args.store).collect_unreferenced(tuple(args.keep), dry_run=not args.delete)
+        print(
+            json.dumps(
+                {
+                    "kept": list(gc_report.kept),
+                    "removed": list(gc_report.removed),
+                    "bytes": gc_report.bytes,
+                    "dry_run": not args.delete,
                 },
                 sort_keys=True,
             )
