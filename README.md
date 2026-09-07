@@ -248,6 +248,11 @@ described by a strict versioned JSON plan and passed to
 `corpusledger pipeline --plan`. Plans never import arbitrary Python; see
 [pipeline plans](docs/pipeline-plans.md).
 
+For bounded metadata queries over a large manifest, build a digest-bound SQLite
+index with `corpusledger index`, verify it with `verify-index`, and query it with
+`query-index`. The index stores record hashes and JSON Pointer field paths, not
+corpus text; see [manifest indexes](docs/manifest-indexes.md).
+
 ## What a manifest contains
 
 - format and normalization version;

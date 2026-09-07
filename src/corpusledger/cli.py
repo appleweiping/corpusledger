@@ -19,6 +19,7 @@ from .errors import (
     SignatureError,
     SignatureVerificationError,
 )
+from .index import ManifestIndex
 from .manifest import Manifest, build_manifest
 from .pipeline import drop_fields, rename_field, run_pipeline, select_fields
 from .plan import load_pipeline_plan
@@ -59,6 +60,19 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("manifest")
     verify.add_argument("--input", help="override the source path recorded in the manifest")
     verify.add_argument("--reader", help="override or confirm the recorded reader entry point")
+    index = subparsers.add_parser("index", help="build a queryable SQLite index for a manifest")
+    index.add_argument("manifest")
+    index.add_argument("output")
+    verify_index = subparsers.add_parser("verify-index", help="verify an index against a manifest")
+    verify_index.add_argument("manifest")
+    verify_index.add_argument("index")
+    query_index = subparsers.add_parser("query-index", help="query indexed manifest metadata")
+    query_index.add_argument("index")
+    query_index.add_argument("--id-prefix")
+    query_index.add_argument("--source")
+    query_index.add_argument("--field")
+    query_index.add_argument("--limit", type=int, default=100)
+    query_index.add_argument("--output")
 
     sign = subparsers.add_parser("sign", help="create a detached Ed25519 signature")
     sign.add_argument("manifest")
@@ -167,6 +181,31 @@ def run(argv: list[str] | None = None) -> int:
         )
         manifest.save(args.output)
         print(f"wrote {len(manifest.records)} records to {args.output}")
+        return 0
+    if args.command == "index":
+        manifest_path = Path(args.manifest).resolve()
+        output_path = Path(args.output).resolve()
+        _require_distinct(output_path, manifest_path, message="index output must differ from its manifest")
+        manifest = Manifest.load(manifest_path)
+        with ManifestIndex.build(manifest, output_path) as manifest_index:
+            print(json.dumps(manifest_index.stats(), sort_keys=True))
+        return 0
+    if args.command == "verify-index":
+        manifest = Manifest.load(args.manifest)
+        with ManifestIndex(args.index) as manifest_index:
+            manifest_index.verify(manifest)
+            print(json.dumps(manifest_index.stats(), sort_keys=True))
+        return 0
+    if args.command == "query-index":
+        with ManifestIndex(args.index) as manifest_index:
+            rows = manifest_index.query(
+                id_prefix=args.id_prefix,
+                source=args.source,
+                field_path=args.field,
+                limit=args.limit,
+            )
+            payload = {"index": manifest_index.stats(), "records": [row.to_dict() for row in rows]}
+        _write_report(json.dumps(payload, indent=2, sort_keys=True) + "\n", args.output)
         return 0
     if args.command == "bundle":
         manifest_path = Path(args.manifest).resolve()

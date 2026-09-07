@@ -1,0 +1,86 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+from corpusledger import ManifestIndex, build_manifest
+from corpusledger.cli import run
+
+
+def _manifest(tmp_path: Path, value: int = 1):
+    source = tmp_path / "records.jsonl"
+    source.write_text(
+        json.dumps({"id": "alpha", "text": "hello", "value": value})
+        + "\n"
+        + json.dumps({"id": "beta", "text": "bye", "value": 2})
+        + "\n",
+        encoding="utf-8",
+    )
+    return build_manifest(source)
+
+
+def test_manifest_index_builds_queries_and_verifies(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    index_path = tmp_path / "records.index.db"
+    with ManifestIndex.build(manifest, index_path) as index:
+        assert index.manifest_digest
+        assert index.corpus_hash == manifest.corpus_hash
+        assert index.record_count == 2
+        assert index.get("alpha").field_paths == ("/id", "/text", "/value")
+        assert [row.record_id for row in index.query(id_prefix="a")] == ["alpha"]
+        assert [row.record_id for row in index.query(source="records.jsonl")] == ["alpha", "beta"]
+        assert [row.record_id for row in index.query(field_path="/text")] == ["alpha", "beta"]
+        assert index.stats()["field_paths"] == 6
+        index.verify(manifest)
+        with pytest.raises(KeyError):
+            index.get("missing")
+    with pytest.raises(ValueError, match="closed"):
+        index.stats()  # type: ignore[union-attr]
+
+
+def test_manifest_index_detects_manifest_mismatch_and_bad_filters(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path, 1)
+    changed = _manifest(tmp_path, 3)
+    path = tmp_path / "index.db"
+    index = ManifestIndex.build(manifest, path)
+    try:
+        with pytest.raises(ValueError, match="digest"):
+            index.verify(changed)
+        with pytest.raises(ValueError, match="limit"):
+            index.query(limit=0)
+        with pytest.raises(ValueError, match="id_prefix"):
+            index.query(id_prefix="")
+        with pytest.raises(ValueError, match="field_path"):
+            index.query(field_path="")
+    finally:
+        index.close()
+
+
+def test_manifest_index_accepts_empty_manifest_and_rejects_untrusted_files(tmp_path: Path) -> None:
+    source = tmp_path / "empty.jsonl"
+    source.write_text("", encoding="utf-8")
+    manifest = build_manifest(source)
+    path = tmp_path / "empty.db"
+    with ManifestIndex.build(manifest, path) as index:
+        assert index.record_count == 0
+        assert index.query() == ()
+    malformed = tmp_path / "malformed.db"
+    malformed.write_text("not sqlite", encoding="utf-8")
+    with pytest.raises(ValueError, match=r"not a supported|file is not a database"):
+        ManifestIndex(malformed)
+
+
+def test_manifest_index_cli_build_verify_and_query(tmp_path: Path, capsys) -> None:  # type: ignore[no-untyped-def]
+    manifest = _manifest(tmp_path)
+    manifest_path = tmp_path / "records.manifest.json"
+    manifest.save(manifest_path)
+    index_path = tmp_path / "records.index.db"
+    assert run(["index", str(manifest_path), str(index_path)]) == 0
+    assert run(["verify-index", str(manifest_path), str(index_path)]) == 0
+    output = tmp_path / "query.json"
+    assert run(["query-index", str(index_path), "--field", "/text", "--output", str(output)]) == 0
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert [row["record_id"] for row in payload["records"]] == ["alpha", "beta"]
+    assert "manifest_digest" in capsys.readouterr().out

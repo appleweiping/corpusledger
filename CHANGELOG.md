@@ -13,6 +13,8 @@ All notable changes follow the principles of Keep a Changelog.
   and drop transformations with checkpoint provenance.
 - Add strict versioned JSON pipeline plans that compile to the same built-in
   transformations and are accepted by `corpusledger pipeline --plan`.
+- Add digest-bound SQLite manifest indexes with atomic builds, record/source/field
+  filters, full verification, and `index`, `verify-index`, and `query-index` CLI commands.
 
 ### Added
 
