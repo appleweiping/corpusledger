@@ -2,7 +2,9 @@
 
 from .canonical import CANONICAL_VERSION, CanonicalPolicy, canonical_bytes, canonical_json, canonicalize
 from .diff import CorpusDiff, compare
+from .errors import InputError
 from .manifest import MANIFEST_FORMAT, Manifest, build_manifest
+from .pipeline import PipelineReport, PipelineStep, drop_fields, rename_field, run_pipeline, select_fields
 from .privacy import PrivacyConfig
 from .readers import READER_ENTRY_POINT_GROUP, ReaderAdapter, Record, iter_corpus, load_reader_adapter
 from .signing import (
@@ -19,7 +21,10 @@ __all__ = [
     "SIGNATURE_FORMAT",
     "CanonicalPolicy",
     "CorpusDiff",
+    "InputError",
     "Manifest",
+    "PipelineReport",
+    "PipelineStep",
     "PrivacyConfig",
     "ReaderAdapter",
     "Record",
@@ -29,8 +34,12 @@ __all__ = [
     "canonical_json",
     "canonicalize",
     "compare",
+    "drop_fields",
     "iter_corpus",
     "load_reader_adapter",
+    "rename_field",
+    "run_pipeline",
+    "select_fields",
     "sign_manifest",
     "verify_manifest_signature",
 ]

@@ -4,6 +4,11 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+### Added
+
+- Atomic streaming transformation pipelines with ID preservation, source/output digests,
+  failure-safe output replacement, and resumable provenance checkpoints.
+
 ## [0.2.0] - 2026-08-31
 
 ### Added
