@@ -1,0 +1,13 @@
+{
+  "bundle_bytes": 1722,
+  "elapsed_seconds": 0.06741709998459555,
+  "kind": "fixture-real",
+  "manifest_digest": "82bbcbf5b3cb7eee4f4b7f0aa4763df2ae963370b71cca555900405cd9e82d85",
+  "peak_python_bytes": 542151,
+  "platform": "Windows-11-10.0.26200-SP0",
+  "python": "3.14.5",
+  "records": 3,
+  "source": "examples/after.jsonl",
+  "source_bytes": 290,
+  "source_sha256": "1202b5d32f5d3835a1373dc8c90262a70af06a822efe99bcf2c3d35bb6e4c482"
+}

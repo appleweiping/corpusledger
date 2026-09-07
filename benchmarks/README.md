@@ -43,3 +43,8 @@ results only when the generator parameters, CorpusLedger version, Python version
 The machine was shared with concurrent build/test jobs, which is visible in the spread between repeats. These numbers
 are intentionally retained instead of publishing only the fastest run. Treat the file as a reproducible baseline and
 format/memory audit, not as a hardware capacity claim; rerun it on the intended deployment storage before sizing a job.
+
+`benchmark_fixture.py` additionally exercises the checked-in human-authored
+JSONL example through manifest creation, deterministic bundling, and archive
+verification. It records the input digest and environment; this is fixture-real
+evidence and is intentionally separate from generated 100,000-record scale data.
