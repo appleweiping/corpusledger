@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .catalog import SnapshotCatalog
 from .diff import compare
 from .manifest import Manifest, build_manifest
 from .store import verify_bundle
@@ -48,7 +49,9 @@ class CorpusService:
                 "files": list(report.files),
                 "bytes": report.bytes,
             }
-        raise ValueError("operation must be one of: manifest, diff, verify_bundle")
+        if operation == "catalog":
+            return _catalog_request(request)
+        raise ValueError("operation must be one of: manifest, diff, verify_bundle, catalog")
 
 
 def create_server(
@@ -100,3 +103,86 @@ def _required_path(request: Mapping[str, Any], name: str) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty path string")
     return Path(value)
+
+
+def _catalog_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Dispatch catalog listing, lineage, diff, and registration requests."""
+
+    database = _required_path(request, "database")
+    action = request.get("action", "list")
+    if not isinstance(action, str):
+        raise ValueError("catalog action must be a string")
+    with SnapshotCatalog(database) as catalog:
+        if action == "list":
+            name = request.get("name")
+            if name is not None and not isinstance(name, str):
+                raise ValueError("catalog name must be a string or omitted")
+            refs = catalog.list(name)
+            return {
+                "operation": "catalog",
+                "action": action,
+                "snapshots": [_snapshot_ref_payload(ref) for ref in refs],
+            }
+        if action == "lineage":
+            corpus_hash = request.get("corpus_hash")
+            if not isinstance(corpus_hash, str) or not corpus_hash:
+                raise ValueError("corpus_hash must be a non-empty string")
+            return {
+                "operation": "catalog",
+                "action": action,
+                "lineage": [_snapshot_ref_payload(ref) for ref in catalog.lineage(corpus_hash)],
+            }
+        if action == "diff":
+            name = request.get("name")
+            before = request.get("before")
+            after = request.get("after")
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("catalog name must be a non-empty string")
+            if isinstance(before, bool) or not isinstance(before, int):
+                raise ValueError("before must be an integer")
+            if isinstance(after, bool) or not isinstance(after, int):
+                raise ValueError("after must be an integer")
+            difference = catalog.diff(name, before, after)
+            return {
+                "operation": "catalog",
+                "action": action,
+                "name": name,
+                "before": before,
+                "after": after,
+                "diff": difference.to_dict(),
+            }
+        if action == "register":
+            name = request.get("name")
+            manifest_path = request.get("manifest")
+            parent = request.get("parent")
+            tags = request.get("tags", [])
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("catalog name must be a non-empty string")
+            if not isinstance(manifest_path, str) or not manifest_path.strip():
+                raise ValueError("manifest must be a non-empty path string")
+            if parent is not None and not isinstance(parent, str):
+                raise ValueError("parent must be a string or omitted")
+            if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+                raise ValueError("tags must be an array of strings")
+            ref = catalog.register(
+                name,
+                Manifest.load(manifest_path),
+                parent=parent,
+                tags=tuple(tags),
+            )
+            return {
+                "operation": "catalog",
+                "action": action,
+                "snapshot": _snapshot_ref_payload(ref),
+            }
+    raise ValueError("catalog action must be one of: list, lineage, diff, register")
+
+
+def _snapshot_ref_payload(ref: Any) -> dict[str, Any]:
+    return {
+        "name": ref.name,
+        "version": ref.version,
+        "corpus_hash": ref.corpus_hash,
+        "parent": ref.parent,
+        "tags": list(ref.tags),
+    }

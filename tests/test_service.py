@@ -71,6 +71,65 @@ def test_service_diff_and_bundle_verification(tmp_path) -> None:
     assert verified["files"] == ["manifest.json", "source/after.jsonl"]
 
 
+def test_service_catalog_operations_are_typed_and_lineage_aware(tmp_path) -> None:
+    first_source = tmp_path / "first.jsonl"
+    second_source = tmp_path / "second.jsonl"
+    first_source.write_text('{"id":"a","text":"one"}\n', encoding="utf-8")
+    second_source.write_text('{"id":"a","text":"two"}\n', encoding="utf-8")
+    first = build_manifest(first_source)
+    second = build_manifest(second_source)
+    first_path = tmp_path / "first.manifest.json"
+    second_path = tmp_path / "second.manifest.json"
+    first.save(first_path)
+    second.save(second_path)
+    database = tmp_path / "catalog.sqlite"
+    service = CorpusService()
+    registered = service.dispatch(
+        {
+            "operation": "catalog",
+            "action": "register",
+            "database": str(database),
+            "name": "release",
+            "manifest": str(first_path),
+            "tags": ["baseline"],
+        }
+    )
+    first_hash = registered["snapshot"]["corpus_hash"]
+    second_registered = service.dispatch(
+        {
+            "operation": "catalog",
+            "action": "register",
+            "database": str(database),
+            "name": "release",
+            "manifest": str(second_path),
+            "parent": first_hash,
+        }
+    )
+    assert second_registered["snapshot"]["version"] == 2
+    listing = service.dispatch({"operation": "catalog", "database": str(database), "action": "list", "name": "release"})
+    assert [item["version"] for item in listing["snapshots"]] == [1, 2]
+    lineage = service.dispatch(
+        {
+            "operation": "catalog",
+            "database": str(database),
+            "action": "lineage",
+            "corpus_hash": second_registered["snapshot"]["corpus_hash"],
+        }
+    )
+    assert [item["version"] for item in lineage["lineage"]] == [2, 1]
+    difference = service.dispatch(
+        {
+            "operation": "catalog",
+            "database": str(database),
+            "action": "diff",
+            "name": "release",
+            "before": 1,
+            "after": 2,
+        }
+    )
+    assert difference["diff"]["has_changes"] is True
+
+
 def test_service_rejects_invalid_requests_and_endpoint(tmp_path) -> None:
     with pytest.raises(ValueError, match="request must be an object"):
         CorpusService().dispatch([])  # type: ignore[arg-type]
@@ -93,3 +152,19 @@ def test_service_rejects_invalid_requests_and_endpoint(tmp_path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_service_catalog_validates_request_shape(tmp_path) -> None:
+    database = tmp_path / "catalog.sqlite"
+    service = CorpusService()
+    invalid_requests = (
+        {"operation": "catalog", "database": str(database), "action": 1},
+        {"operation": "catalog", "database": str(database), "action": "list", "name": 1},
+        {"operation": "catalog", "database": str(database), "action": "lineage", "corpus_hash": ""},
+        {"operation": "catalog", "database": str(database), "action": "diff", "name": "x", "before": True, "after": 2},
+        {"operation": "catalog", "database": str(database), "action": "register", "name": "x", "manifest": "x", "tags": "bad"},
+        {"operation": "catalog", "database": str(database), "action": "unknown"},
+    )
+    for request in invalid_requests:
+        with pytest.raises((ValueError, KeyError)):
+            service.dispatch(request)
