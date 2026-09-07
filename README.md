@@ -338,7 +338,8 @@ wheel smoke tests on Linux, Windows, and macOS.
 
 - per-field list-order policies with an external-sort implementation;
 - bounded-size or external manifest indexes for corpora whose manifest metadata itself exceeds memory;
-- optional JSON Schema export and compatibility modes;
+- JSON Schema export is available through the `corpusledger schema manifest`
+  command; compatibility validation modes remain future work;
 - Sigstore-compatible keyless attestations and transparency-log integration;
 - configurable path exclusion and privacy rule packs;
 - maintained adapters for columnar and remote object-store formats in separate packages.
