@@ -6,7 +6,9 @@ import argparse
 import json
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from .canonical import CanonicalPolicy
 from .diff import compare
@@ -24,6 +26,7 @@ from .reporting import render
 from .service import create_server
 from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
 from .store import ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
+from .stream import NdjsonGateway
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -90,6 +93,28 @@ def _parser() -> argparse.ArgumentParser:
     serve = subparsers.add_parser("serve", help="serve the local HTTP/JSON dispatch API")
     serve.add_argument("--host", default="127.0.0.1")
     serve.add_argument("--port", type=int, default=8080)
+    stream = subparsers.add_parser("stream", help="process gateway requests from stdin as NDJSON")
+    stream.add_argument(
+        "--max-line-bytes",
+        type=int,
+        default=1_048_576,
+        help="reject request lines larger than this UTF-8 byte limit",
+    )
+    stream.add_argument(
+        "--field",
+        action="append",
+        default=[],
+        help="field exposed by the built-in select processor (repeat for multiple fields)",
+    )
+    stream.add_argument(
+        "--report-output",
+        help="write a JSON digest/count report after responses have been emitted",
+    )
+    stream.add_argument(
+        "--strict",
+        action="store_true",
+        help="return status 2 when any input line produces an error response",
+    )
     return parser
 
 
@@ -201,6 +226,8 @@ def run(argv: list[str] | None = None) -> int:
         finally:
             server.server_close()
         return 0
+    if args.command == "stream":
+        return _run_stream(args)
     if args.command == "diff":
         if args.output:
             output_path = Path(args.output).resolve()
@@ -293,6 +320,47 @@ def _manifest_mismatches(existing: Manifest, rebuilt: Manifest) -> list[str]:
         "reader_metadata",
     )
     return [name for name in fields if getattr(existing, name) != getattr(rebuilt, name)]
+
+
+def _run_stream(args: argparse.Namespace) -> int:
+    """Run the language-neutral gateway over stdin/stdout.
+
+    The command deliberately exposes only deterministic, dependency-free
+    processors. Applications that need domain-specific processing can use the
+    :class:`NdjsonGateway` API and register their own processors.
+    """
+
+    if args.max_line_bytes < 1:
+        raise InputError("--max-line-bytes must be positive")
+
+    gateway = NdjsonGateway(max_line_bytes=args.max_line_bytes)
+
+    def identity(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return payload
+
+    selected_fields = tuple(args.field)
+
+    def select(payload: Mapping[str, Any]) -> Mapping[str, Any]:
+        return {field: payload[field] for field in selected_fields if field in payload}
+
+    gateway.register("identity", identity)
+    gateway.register("select", select)
+    input_stream = getattr(sys.stdin, "buffer", sys.stdin)
+    responses, report = gateway.process_lines(input_stream)
+    for response in responses:
+        sys.stdout.write(response)
+    summary = {
+        "input_digest": report.input_digest,
+        "output_digest": report.output_digest,
+        "records": report.records,
+        "successes": report.successes,
+        "failures": report.failures,
+    }
+    if args.report_output:
+        _write_report(json.dumps(summary, sort_keys=True) + "\n", args.report_output)
+    else:
+        sys.stderr.write(json.dumps(summary, sort_keys=True) + "\n")
+    return 2 if args.strict and report.failures else 0
 
 
 def _reader(name: str | None) -> ReaderAdapter | None:

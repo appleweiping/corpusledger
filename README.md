@@ -165,6 +165,30 @@ retained. A `.json` array is materialized by Python's standard JSON decoder. The
 retains canonical sequence members so v0.1 hashes remain compatible; use the default list-preserving policy for the
 streaming path. See [architecture](docs/architecture.md) and the [reproducible benchmark](benchmarks/README.md).
 
+### Language-neutral NDJSON gateway
+
+The `NdjsonGateway` API and `corpusledger stream` command provide a bounded subprocess-friendly protocol. Each input
+line is a JSON object with a `processor` name and object `payload`; each line receives exactly one compact JSON response,
+including a structured error for malformed input. The CLI ships deterministic `identity` and `select` processors and
+emits SHA-256 input/output digests plus success/failure counts to stderr (or `--report-output`):
+
+```console
+printf '%s\n' '{"processor":"select","payload":{"id":"a","text":"hello"}}' \
+  | corpusledger stream --field id --strict
+```
+
+Use the Python API to register application-specific processors without giving the CLI arbitrary code execution:
+
+```python
+from corpusledger import NdjsonGateway
+
+gateway = NdjsonGateway(max_line_bytes=1_048_576)
+gateway.register("normalize", lambda payload: {"text": str(payload["text"]).strip()})
+responses, report = gateway.process_lines(input_lines)
+```
+
+See [stream gateway](docs/stream.md) for the wire contract and failure semantics.
+
 ### Reader adapters
 
 Built-in `.json` and `.jsonl` readers require no plugin. A reviewed package may expose another file reader under the

@@ -7,6 +7,8 @@ All notable changes follow the principles of Keep a Changelog.
 - Add a loopback-first HTTP/JSON service boundary for manifest, diff, and bundle verification operations.
 - Add a language-neutral NDJSON processor gateway with deterministic stream
   digests, bounded lines, and one structured response per input record.
+- Expose the gateway as a `corpusledger stream` CLI with safe identity/select
+  processors, digest reports, and strict failure status handling.
 
 ### Added
 

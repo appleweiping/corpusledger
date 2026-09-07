@@ -1,3 +1,4 @@
+import io
 import json
 from collections.abc import Iterator
 from pathlib import Path
@@ -25,6 +26,48 @@ def test_snapshot_verify_and_diff_end_to_end(tmp_path: Path, capsys: object) -> 
     report = tmp_path / "report.json"
     assert run(["diff", str(first), str(second), "--format", "json", "--output", str(report)]) == 1
     assert json.loads(report.read_text(encoding="utf-8"))["changed_records"]["a"]
+
+
+def test_stream_cli_emits_one_response_per_request_and_writes_report(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    requests = "\n".join(
+        [
+            json.dumps({"processor": "identity", "payload": {"id": "a", "text": "hello"}}),
+            json.dumps({"processor": "select", "payload": {"id": "b", "text": "bye"}}),
+            "not-json",
+        ]
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(requests + "\n"))
+    report_path = tmp_path / "stream-report.json"
+    assert run(["stream", "--field", "id", "--report-output", str(report_path)]) == 0
+    output = capsys.readouterr()
+    responses = [json.loads(line) for line in output.out.splitlines()]
+    assert len(responses) == 3
+    assert responses[0]["result"] == {"id": "a", "text": "hello"}
+    assert responses[1]["result"] == {"id": "b"}
+    assert responses[2]["ok"] is False
+    summary = json.loads(report_path.read_text(encoding="utf-8"))
+    assert summary["records"] == 3
+    assert summary["successes"] == 2
+    assert summary["failures"] == 1
+    assert output.err == ""
+
+
+def test_stream_cli_strict_mode_returns_error_for_malformed_request(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("sys.stdin", io.StringIO("not-json\n"))
+    assert run(["stream", "--strict"]) == 2
+    assert json.loads(capsys.readouterr().out)["ok"] is False
+
+
+def test_stream_cli_rejects_invalid_line_limit() -> None:
+    with pytest.raises(InputError, match="must be positive"):
+        run(["stream", "--max-line-bytes", "0"])
 
 
 def test_bundle_command_writes_reproducible_archive(tmp_path: Path, capsys: object) -> None:
