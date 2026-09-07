@@ -11,6 +11,12 @@ server = create_server(host="127.0.0.1", port=8080)
 server.serve_forever()
 ```
 
+The equivalent command-line entry point is:
+
+```bash
+corpusledger serve --host 127.0.0.1 --port 8080
+```
+
 Requests use an explicit `operation` (`manifest`, `diff`, or `verify_bundle`)
 and filesystem paths. The default loopback binding is intentional; add an
 authenticated reverse proxy before exposing the process outside a trusted

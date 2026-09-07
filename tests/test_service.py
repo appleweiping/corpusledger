@@ -8,6 +8,7 @@ from urllib.error import HTTPError
 import pytest
 
 from corpusledger import CorpusService, build_manifest, bundle_snapshot, create_server
+from corpusledger.cli import _parser
 
 
 def test_service_dispatch_manifest_and_http(tmp_path) -> None:
@@ -41,6 +42,13 @@ def test_service_rejects_unknown_operations() -> None:
         assert "operation must be one of" in str(error)
     else:  # pragma: no cover
         raise AssertionError("unknown operation was accepted")
+
+
+def test_cli_exposes_service_command() -> None:
+    args = _parser().parse_args(["serve", "--host", "127.0.0.1", "--port", "0"])
+    assert args.command == "serve"
+    assert args.host == "127.0.0.1"
+    assert args.port == 0
 
 
 def test_service_diff_and_bundle_verification(tmp_path) -> None:

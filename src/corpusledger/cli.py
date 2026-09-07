@@ -21,6 +21,7 @@ from .manifest import Manifest, build_manifest
 from .privacy import PrivacyConfig
 from .readers import ReaderAdapter, load_reader_adapter
 from .reporting import render
+from .service import create_server
 from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
 from .store import ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
 
@@ -86,6 +87,9 @@ def _parser() -> argparse.ArgumentParser:
     gc.add_argument("store")
     gc.add_argument("--keep", action="append", default=[])
     gc.add_argument("--delete", action="store_true", help="remove unreferenced objects")
+    serve = subparsers.add_parser("serve", help="serve the local HTTP/JSON dispatch API")
+    serve.add_argument("--host", default="127.0.0.1")
+    serve.add_argument("--port", type=int, default=8080)
     return parser
 
 
@@ -188,6 +192,14 @@ def run(argv: list[str] | None = None) -> int:
                 sort_keys=True,
             )
         )
+        return 0
+    if args.command == "serve":
+        server = create_server(host=args.host, port=args.port)
+        print(f"serving CorpusLedger on http://{args.host}:{server.server_port}/v1/dispatch")
+        try:
+            server.serve_forever()
+        finally:
+            server.server_close()
         return 0
     if args.command == "diff":
         if args.output:
