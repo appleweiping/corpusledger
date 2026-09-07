@@ -254,6 +254,8 @@ index with `corpusledger index`, verify it with `verify-index`, and query it wit
 corpus text; see [manifest indexes](docs/manifest-indexes.md).
 `duplicate-fields` groups repeated authenticated field digests for leakage
 review without revealing the original values.
+The `catalog` CLI exposes named snapshot registration, lineage, listing, and
+version diffs for reproducible release workflows.
 
 ## What a manifest contains
 

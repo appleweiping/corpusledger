@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .canonical import CanonicalPolicy
+from .catalog import SnapshotCatalog, SnapshotRef
 from .diff import compare
 from .errors import (
     CorpusLedgerError,
@@ -79,6 +80,30 @@ def _parser() -> argparse.ArgumentParser:
     duplicates.add_argument("--field")
     duplicates.add_argument("--limit", type=int, default=100)
     duplicates.add_argument("--output")
+
+    catalog = subparsers.add_parser("catalog", help="register and inspect named manifest snapshots")
+    catalog_actions = catalog.add_subparsers(dest="catalog_action", required=True)
+    register = catalog_actions.add_parser("register", help="append a manifest version")
+    register.add_argument("database")
+    register.add_argument("name")
+    register.add_argument("manifest")
+    register.add_argument("--parent")
+    register.add_argument("--tag", action="append", default=[])
+    catalog_list = catalog_actions.add_parser("list", help="list named snapshot versions")
+    catalog_list.add_argument("database")
+    catalog_list.add_argument("--name")
+    catalog_list.add_argument("--output")
+    lineage = catalog_actions.add_parser("lineage", help="follow a snapshot parent chain")
+    lineage.add_argument("database")
+    lineage.add_argument("corpus_hash")
+    lineage.add_argument("--output")
+    catalog_diff = catalog_actions.add_parser("diff", help="diff two versions in a snapshot series")
+    catalog_diff.add_argument("database")
+    catalog_diff.add_argument("name")
+    catalog_diff.add_argument("before", type=int)
+    catalog_diff.add_argument("after", type=int)
+    catalog_diff.add_argument("--format", choices=("json", "markdown"), default="json")
+    catalog_diff.add_argument("--output")
 
     sign = subparsers.add_parser("sign", help="create a detached Ed25519 signature")
     sign.add_argument("manifest")
@@ -160,9 +185,45 @@ def _write_report(text: str, destination: str | None) -> None:
         sys.stdout.write(text)
 
 
+def _snapshot_ref_payload(ref: SnapshotRef) -> dict[str, object]:
+    return {
+        "name": ref.name,
+        "version": ref.version,
+        "corpus_hash": ref.corpus_hash,
+        "parent": ref.parent,
+        "tags": list(ref.tags),
+    }
+
+
+def _catalog_command(args: argparse.Namespace) -> int:
+    with SnapshotCatalog(args.database) as catalog:
+        if args.catalog_action == "register":
+            manifest = Manifest.load(args.manifest)
+            ref = catalog.register(
+                args.name,
+                manifest,
+                parent=args.parent,
+                tags=tuple(args.tag),
+            )
+            payload: object = _snapshot_ref_payload(ref)
+        elif args.catalog_action == "list":
+            payload = [_snapshot_ref_payload(item) for item in catalog.list(args.name)]
+        elif args.catalog_action == "lineage":
+            payload = [_snapshot_ref_payload(item) for item in catalog.lineage(args.corpus_hash)]
+        else:
+            difference = catalog.diff(args.name, args.before, args.after)
+            _write_report(render(difference, args.format), args.output)
+            return 0
+    destination = getattr(args, "output", None)
+    _write_report(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n", destination)
+    return 0
+
+
 def run(argv: list[str] | None = None) -> int:
     """Execute the CLI and return a process status."""
     args = _parser().parse_args(argv)
+    if args.command == "catalog":
+        return _catalog_command(args)
     if args.command == "snapshot":
         input_path = Path(args.input).resolve()
         output_path = Path(args.output).resolve()

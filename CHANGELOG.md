@@ -4,6 +4,8 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Expose snapshot catalog registration, lineage, listing, and diffs through a
+  scriptable `catalog` CLI.
 - Add authenticated duplicate-field groups and field-digest filtering to manifest indexes.
 - Add a loopback-first HTTP/JSON service boundary for manifest, diff, and bundle verification operations.
 - Add a language-neutral NDJSON processor gateway with deterministic stream

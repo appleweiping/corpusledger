@@ -1,8 +1,10 @@
+import json
 from pathlib import Path
 
 import pytest
 
 from corpusledger import SnapshotCatalog, build_manifest
+from corpusledger.cli import run
 
 
 def make_manifest(path: Path, value: int):
@@ -47,3 +49,43 @@ def test_catalog_close_is_idempotent(tmp_path: Path) -> None:
     catalog.close()
     with pytest.raises(ValueError, match="closed"):
         catalog.list()
+
+
+def test_catalog_cli_register_list_lineage_and_diff(tmp_path: Path) -> None:
+    source = tmp_path / "data.jsonl"
+    manifest_one_path = tmp_path / "one.json"
+    manifest_two_path = tmp_path / "two.json"
+    source.write_text('{"id":"a","value":1}\n', encoding="utf-8")
+    one = build_manifest(source)
+    one.save(manifest_one_path)
+    source.write_text('{"id":"a","value":2}\n', encoding="utf-8")
+    two = build_manifest(source)
+    two.save(manifest_two_path)
+    database = tmp_path / "catalog.db"
+    assert run(["catalog", "register", str(database), "dataset", str(manifest_one_path), "--tag", "raw"]) == 0
+    assert (
+        run(
+            [
+                "catalog",
+                "register",
+                str(database),
+                "dataset",
+                str(manifest_two_path),
+                "--parent",
+                one.corpus_hash,
+                "--tag",
+                "latest",
+            ]
+        )
+        == 0
+    )
+    listing = tmp_path / "listing.json"
+    assert run(["catalog", "list", str(database), "--name", "dataset"]) == 0
+    assert run(["catalog", "lineage", str(database), two.corpus_hash, "--output", str(listing)]) == 0
+    assert len(json.loads(listing.read_text(encoding="utf-8"))) == 2
+    diff = tmp_path / "diff.json"
+    assert run(["catalog", "diff", str(database), "dataset", "1", "2", "--output", str(diff)]) == 0
+    changed = json.loads(diff.read_text(encoding="utf-8"))["changed_records"]["a"]
+    assert changed["fields"] == ["/value"]
+    assert changed["from"] == one.records[0].hash
+    assert changed["to"] == two.records[0].hash
