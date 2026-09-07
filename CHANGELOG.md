@@ -4,6 +4,8 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add a loopback-first HTTP/JSON service boundary for manifest, diff, and bundle verification operations.
+
 ### Added
 
 - Atomic streaming transformation pipelines with ID preservation, source/output digests,

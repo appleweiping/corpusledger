@@ -8,6 +8,7 @@ from .manifest import MANIFEST_FORMAT, Manifest, build_manifest
 from .pipeline import PipelineReport, PipelineStep, drop_fields, rename_field, run_pipeline, select_fields
 from .privacy import PrivacyConfig
 from .readers import READER_ENTRY_POINT_GROUP, ReaderAdapter, Record, iter_corpus, load_reader_adapter
+from .service import CorpusService, create_server
 from .signing import (
     SIGNATURE_FORMAT,
     SignatureEnvelope,
@@ -33,6 +34,7 @@ __all__ = [
     "BundleVerification",
     "CanonicalPolicy",
     "CorpusDiff",
+    "CorpusService",
     "GarbageCollectionReport",
     "InputError",
     "Manifest",
@@ -51,6 +53,7 @@ __all__ = [
     "canonical_json",
     "canonicalize",
     "compare",
+    "create_server",
     "drop_fields",
     "extract_bundle",
     "iter_corpus",
