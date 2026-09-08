@@ -28,7 +28,7 @@ from .plan import load_pipeline_plan
 from .privacy import PrivacyConfig
 from .readers import ReaderAdapter, iter_corpus, load_reader_adapter
 from .reporting import render
-from .schema import to_json_schema, validate_json_schema
+from .schema import compare_json_schemas, to_json_schema, validate_json_schema
 from .service import create_server
 from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
 from .store import ObjectStore, bundle_snapshot, extract_bundle, verify_bundle
@@ -77,6 +77,13 @@ def _parser() -> argparse.ArgumentParser:
     schema_validate.add_argument("--id-field", default="id")
     schema_validate.add_argument("--max-errors", type=int, default=100)
     schema_validate.add_argument("--output")
+    schema_compat = subparsers.add_parser(
+        "schema-compat", help="check backward/forward compatibility of two JSON Schemas"
+    )
+    schema_compat.add_argument("before")
+    schema_compat.add_argument("after")
+    schema_compat.add_argument("--mode", choices=("backward", "forward", "full"), default="backward")
+    schema_compat.add_argument("--output")
 
     difference = subparsers.add_parser("diff", help="compare two manifests")
     difference.add_argument("before")
@@ -330,6 +337,18 @@ def run(argv: list[str] | None = None) -> int:
         rendered = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         _write_report(rendered, args.output)
         return 0 if not issues else 2
+    if args.command == "schema-compat":
+        before_path = Path(args.before).resolve()
+        after_path = Path(args.after).resolve()
+        try:
+            before = json.loads(before_path.read_text(encoding="utf-8"))
+            after = json.loads(after_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise InputError(f"cannot read schema pair: {exc}") from exc
+        compat_report = compare_json_schemas(before, after, mode=args.mode)
+        rendered = json.dumps(compat_report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        _write_report(rendered, args.output)
+        return 0 if compat_report.compatible else 2
     if args.command == "index":
         manifest_path = Path(args.manifest).resolve()
         output_path = Path(args.output).resolve()

@@ -128,6 +128,136 @@ def schema_drift(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any
     }
 
 
+@dataclass(frozen=True)
+class SchemaCompatibilityIssue:
+    """One conservative compatibility finding between two JSON Schemas."""
+
+    path: str
+    rule: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {"path": self.path, "rule": self.rule, "message": self.message}
+
+
+@dataclass(frozen=True)
+class SchemaCompatibilityReport:
+    """Deterministic backward/forward compatibility result."""
+
+    mode: str
+    compatible: bool
+    issues: tuple[SchemaCompatibilityIssue, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "compatible": self.compatible,
+            "issues": [issue.to_dict() for issue in self.issues],
+        }
+
+
+def compare_json_schemas(
+    before: Mapping[str, Any], after: Mapping[str, Any], *, mode: str = "backward"
+) -> SchemaCompatibilityReport:
+    """Check conservative JSON Schema compatibility without external dependencies.
+
+    ``backward`` asks whether data accepted by ``before`` remains accepted by
+    ``after``; ``forward`` reverses that direction and ``full`` requires both.
+    Unknown schema keywords are ignored, matching the validator's conservative
+    subset contract.
+    """
+
+    if mode not in {"backward", "forward", "full"}:
+        raise ValueError("mode must be backward, forward, or full")
+    if not isinstance(before, Mapping) or not isinstance(after, Mapping):
+        raise TypeError("schemas must be objects")
+    issues: list[SchemaCompatibilityIssue] = []
+    directions = ("backward", "forward") if mode == "full" else (mode,)
+    for direction in directions:
+        _compare_schema_nodes(before, after, "", direction, issues)
+    return SchemaCompatibilityReport(mode, not issues, tuple(issues))
+
+
+def _compare_schema_nodes(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    path: str,
+    direction: str,
+    issues: list[SchemaCompatibilityIssue],
+) -> None:
+    old_types = _schema_types(before.get("type"))
+    new_types = _schema_types(after.get("type"))
+    if old_types and new_types:
+        allowed = new_types if direction == "backward" else old_types
+        restricted = old_types if direction == "backward" else new_types
+        if not allowed.issuperset(restricted):
+            issues.append(
+                SchemaCompatibilityIssue(path or "/", "type", f"schema narrows allowed types to {sorted(new_types)}")
+            )
+    old_required = set(before.get("required", [])) if isinstance(before.get("required"), list) else set()
+    new_required = set(after.get("required", [])) if isinstance(after.get("required"), list) else set()
+    required_change = new_required - old_required if direction == "backward" else old_required - new_required
+    for name in sorted(required_change):
+        issues.append(
+            SchemaCompatibilityIssue(
+                _schema_child(path, name),
+                "required",
+                f"property {name!r} becomes required in the incompatible direction",
+            )
+        )
+    old_enum = _schema_enum(before.get("enum"))
+    new_enum = _schema_enum(after.get("enum"))
+    if old_enum is not None and new_enum is not None:
+        if direction == "backward" and not new_enum.issuperset(old_enum):
+            issues.append(SchemaCompatibilityIssue(path or "/", "enum", "enum values were removed"))
+        if direction == "forward" and not old_enum.issuperset(new_enum):
+            issues.append(SchemaCompatibilityIssue(path or "/", "enum", "enum values were added"))
+    for keyword, direction_sign in (("minItems", 1), ("maxItems", -1), ("minLength", 1), ("maxLength", -1)):
+        old_value, new_value = before.get(keyword), after.get(keyword)
+        if isinstance(old_value, int) and isinstance(new_value, int):
+            changed_tighter = new_value > old_value if direction_sign == 1 else new_value < old_value
+            if direction == "forward":
+                changed_tighter = not changed_tighter and new_value != old_value
+            if changed_tighter:
+                issues.append(SchemaCompatibilityIssue(path or "/", keyword, f"constraint {keyword} became stricter"))
+    old_props = before.get("properties", {})
+    new_props = after.get("properties", {})
+    if isinstance(old_props, Mapping) and isinstance(new_props, Mapping):
+        for name in sorted(set(old_props) & set(new_props)):
+            old_node, new_node = old_props[name], new_props[name]
+            if isinstance(old_node, Mapping) and isinstance(new_node, Mapping):
+                _compare_schema_nodes(old_node, new_node, _schema_child(path, str(name)), direction, issues)
+    old_additional = before.get("additionalProperties", True)
+    new_additional = after.get("additionalProperties", True)
+    if direction == "backward" and new_additional is False and old_additional is not False:
+        issues.append(
+            SchemaCompatibilityIssue(path or "/", "additionalProperties", "additional properties are now rejected")
+        )
+    if direction == "forward" and old_additional is False and new_additional is not False:
+        issues.append(
+            SchemaCompatibilityIssue(path or "/", "additionalProperties", "additional properties are now accepted")
+        )
+
+
+def _schema_types(value: Any) -> set[str]:
+    if isinstance(value, str):
+        return {value}
+    if isinstance(value, list) and all(isinstance(item, str) for item in value):
+        return set(value)
+    return set()
+
+
+def _schema_enum(value: Any) -> set[str] | None:
+    if not isinstance(value, list):
+        return None
+    return {repr(item) for item in value}
+
+
+def _schema_child(path: str, name: str) -> str:
+    escaped = name.replace("~", "~0").replace("/", "~1")
+    return f"{path}/{escaped}"
+
+
 def to_json_schema(
     inferred: Mapping[str, Any],
     *,

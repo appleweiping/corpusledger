@@ -4,6 +4,8 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add conservative backward/forward/full JSON Schema compatibility reports via
+  `schema-compat`, the Python API, and the local service.
 - Add bounded-memory canonical JSONL external sorting with chunk merge, atomic output, and digest reports.
 
 - Add authenticated per-field list-order selectors through `CanonicalPolicy.sort_paths` and `snapshot --sort-path`.

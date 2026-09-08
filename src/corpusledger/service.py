@@ -20,7 +20,7 @@ from .diff import compare
 from .external_sort import external_sort_jsonl
 from .manifest import Manifest, build_manifest
 from .readers import iter_corpus
-from .schema import to_json_schema, validate_json_schema
+from .schema import compare_json_schemas, to_json_schema, validate_json_schema
 from .store import verify_bundle
 
 
@@ -107,10 +107,21 @@ class CorpusService:
                 "records_checked": checked,
                 "errors": [item.to_dict() for item in issues],
             }
+        if operation == "schema_compat":
+            schema_before = _schema_request_value(request, "before")
+            schema_after = _schema_request_value(request, "after")
+            mode = request.get("mode", "backward")
+            if not isinstance(mode, str):
+                raise ValueError("mode must be a string")
+            return {
+                "operation": operation,
+                "report": compare_json_schemas(schema_before, schema_after, mode=mode).to_dict(),
+            }
         if operation == "catalog":
             return _catalog_request(request)
         raise ValueError(
-            "operation must be one of: manifest, diff, verify_bundle, schema, schema_validate, sort_jsonl, catalog"
+            "operation must be one of: manifest, diff, verify_bundle, schema, schema_validate, "
+            "schema_compat, sort_jsonl, catalog"
         )
 
 
@@ -163,6 +174,19 @@ def _required_path(request: Mapping[str, Any], name: str) -> Path:
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f"{name} must be a non-empty path string")
     return Path(value)
+
+
+def _schema_request_value(request: Mapping[str, Any], name: str) -> Mapping[str, Any]:
+    value = request.get(name)
+    if isinstance(value, str):
+        try:
+            raw = json.loads(Path(value).read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise ValueError(f"cannot read schema {name}: {exc}") from exc
+        value = raw
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be a schema object or path string")
+    return value
 
 
 def _catalog_request(request: Mapping[str, Any]) -> dict[str, Any]:
