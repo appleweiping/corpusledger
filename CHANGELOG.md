@@ -4,6 +4,8 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add bounded-memory canonical JSONL external sorting with chunk merge, atomic output, and digest reports.
+
 - Add authenticated per-field list-order selectors through `CanonicalPolicy.sort_paths` and `snapshot --sort-path`.
 
 - Add bounded-memory `schema-validate` corpus checks for a documented,

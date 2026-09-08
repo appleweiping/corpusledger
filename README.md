@@ -121,6 +121,13 @@ corpusledger schema examples/out/before.manifest.json --title support-corpus --o
 See [Observed schema export](docs/schema-export.md) for the conservative
 draft-2020-12 mapping and service request shape.
 
+For very large JSONL inputs, sort records by canonical content using bounded
+memory and atomic output:
+
+```bash
+corpusledger sort-jsonl records.jsonl sorted.jsonl --chunk-size 50000
+```
+
 For mixed records, `--sort-path labels --sort-path metadata.languages` sorts
 only those set-like lists while preserving every other list. The selected
 paths are authenticated in the manifest policy; see [per-field list-order
@@ -341,7 +348,7 @@ wheel smoke tests on Linux, Windows, and macOS.
 
 ## Roadmap
 
-- an external-sort implementation for per-field policies on very large lists;
+- external sorting for canonical JSONL records is available through `sort-jsonl`;
 - bounded-size or external manifest indexes for corpora whose manifest metadata itself exceeds memory;
 - JSON Schema export is available through the `corpusledger schema manifest`
   command; compatibility validation modes remain future work;

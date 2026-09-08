@@ -20,6 +20,7 @@ from .errors import (
     SignatureError,
     SignatureVerificationError,
 )
+from .external_sort import external_sort_jsonl
 from .index import ManifestIndex
 from .manifest import Manifest, build_manifest
 from .pipeline import drop_fields, rename_field, run_pipeline, select_fields
@@ -53,6 +54,11 @@ def _parser() -> argparse.ArgumentParser:
         default=[],
         help="sort only the list at this dotted field path (repeatable)",
     )
+    external_sort = subparsers.add_parser("sort-jsonl", help="externally sort JSONL records by canonical content")
+    external_sort.add_argument("input")
+    external_sort.add_argument("output")
+    external_sort.add_argument("--chunk-size", type=int, default=10_000)
+    external_sort.add_argument("--id-field", default="id")
     snapshot.add_argument(
         "--reader",
         help="explicit corpusledger.readers entry point (third-party code is loaded only when named)",
@@ -272,6 +278,18 @@ def run(argv: list[str] | None = None) -> int:
         )
         manifest.save(args.output)
         print(f"wrote {len(manifest.records)} records to {args.output}")
+        return 0
+    if args.command == "sort-jsonl":
+        input_path = Path(args.input).resolve()
+        output_path = Path(args.output).resolve()
+        _require_distinct(output_path, input_path, message="sort output must differ from input")
+        sort_report = external_sort_jsonl(
+            input_path,
+            output_path,
+            chunk_size=args.chunk_size,
+            id_field=args.id_field,
+        )
+        print(json.dumps(sort_report.to_dict(), sort_keys=True))
         return 0
     if args.command == "schema":
         manifest_path = Path(args.manifest).resolve()
