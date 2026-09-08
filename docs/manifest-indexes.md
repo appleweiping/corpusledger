@@ -31,14 +31,17 @@ fully loaded `Manifest`.
 
 ```console
 corpusledger query-index release.index.db \
-  --id-prefix customer- --field /text --limit 50 --output matches.json
+  --id-prefix customer- --after-id customer-0042 \
+  --field /text --limit 50 --output matches.json
 ```
 
 Filters are optional and can be combined: `--id-prefix` uses a literal,
 case-sensitive prefix; `--source` selects one manifest source file; and
 `--field` selects records containing one JSON Pointer field path. Results are
-ordered by record ID and bounded to 1–10,000 rows. Returned rows include only
-review-safe metadata and field paths, never source values.
+ordered by record ID and bounded to 1–10,000 rows. `--after-id` is an exclusive
+lexicographic cursor, so callers can fetch the next page without an offset scan.
+Returned rows include only review-safe metadata and field paths, never source
+values.
 
 The Python API exposes the same contract:
 
@@ -48,7 +51,7 @@ from corpusledger import Manifest, ManifestIndex
 manifest = Manifest.load("release.manifest.json")
 with ManifestIndex("release.index.db") as index:
     index.verify(manifest)
-    for row in index.query(field_path="/label"):
+    for row in index.query(field_path="/label", after_id="record-0042", limit=100):
         print(row.record_id, row.source, row.position)
 ```
 

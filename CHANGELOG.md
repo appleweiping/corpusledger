@@ -4,6 +4,9 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add deterministic exclusive ID cursors to manifest-index queries through
+  `ManifestIndex.query(after_id=...)` and `query-index --after-id`.
+
 - Add reproducible `snapshot --exclude` path configuration. Exact exclusions
   are persisted in manifests and reused by `verify`, while legacy manifests
   remain loadable without migration.

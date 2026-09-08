@@ -30,6 +30,7 @@ def test_manifest_index_builds_queries_and_verifies(tmp_path: Path) -> None:
         assert index.record_count == 2
         assert index.get("alpha").field_paths == ("/id", "/text", "/value")
         assert [row.record_id for row in index.query(id_prefix="a")] == ["alpha"]
+        assert [row.record_id for row in index.query(after_id="alpha")] == ["beta"]
         assert [row.record_id for row in index.query(source="records.jsonl")] == ["alpha", "beta"]
         assert [row.record_id for row in index.query(field_path="/text")] == ["alpha", "beta"]
         assert index.stats()["field_paths"] == 6

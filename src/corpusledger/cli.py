@@ -111,6 +111,7 @@ def _parser() -> argparse.ArgumentParser:
     query_index = subparsers.add_parser("query-index", help="query indexed manifest metadata")
     query_index.add_argument("index")
     query_index.add_argument("--id-prefix")
+    query_index.add_argument("--after-id", help="return IDs lexicographically after this cursor")
     query_index.add_argument("--source")
     query_index.add_argument("--field")
     query_index.add_argument("--field-hash")
@@ -375,6 +376,7 @@ def run(argv: list[str] | None = None) -> int:
         with ManifestIndex(args.index) as manifest_index:
             rows = manifest_index.query(
                 id_prefix=args.id_prefix,
+                after_id=args.after_id,
                 source=args.source,
                 field_path=args.field,
                 field_hash=args.field_hash,

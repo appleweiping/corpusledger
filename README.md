@@ -361,6 +361,8 @@ wheel smoke tests on Linux, Windows, and macOS.
 - external sorting for canonical JSONL records is available through `sort-jsonl`;
 - bounded one-pass manifest indexes are available through `ManifestIndex.build_stream`
   for validated metadata streams whose complete record list exceeds memory;
+- deterministic cursor pagination is available through `ManifestIndex.query(after_id=...)`
+  and `query-index --after-id` for large index consumers;
 - JSON Schema export is available through the `corpusledger schema manifest`
   command, and `schema-compat` checks backward/forward/full compatibility;
 - Sigstore-compatible keyless attestations and transparency-log integration;

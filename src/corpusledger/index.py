@@ -244,6 +244,7 @@ class ManifestIndex:
         self,
         *,
         id_prefix: str | None = None,
+        after_id: str | None = None,
         source: str | None = None,
         field_path: str | None = None,
         field_hash: str | None = None,
@@ -256,6 +257,7 @@ class ManifestIndex:
             raise ValueError("limit must be an integer between 1 and 10000")
         for name, value in (
             ("id_prefix", id_prefix),
+            ("after_id", after_id),
             ("source", source),
             ("field_path", field_path),
             ("field_hash", field_hash),
@@ -267,6 +269,9 @@ class ManifestIndex:
         if id_prefix is not None:
             clauses.append("r.record_id LIKE ? ESCAPE '\\'")
             parameters.append(id_prefix.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+        if after_id is not None:
+            clauses.append("r.record_id > ?")
+            parameters.append(after_id)
         if source is not None:
             clauses.append("r.source = ?")
             parameters.append(source)
