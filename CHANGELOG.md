@@ -4,6 +4,10 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add `ManifestIndex.build_stream()` for atomically building digest-bound SQLite
+  indexes from one-pass validated `RecordEntry` streams without materializing a
+  complete `Manifest` in memory.
+
 - Add deterministic `default`, `credentials`, and `pii` privacy rule packs to
   the snapshot CLI, local service, and Python API.
 

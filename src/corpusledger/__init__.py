@@ -6,7 +6,7 @@ from .diff import CorpusDiff, compare
 from .errors import InputError
 from .external_sort import ExternalSortReport, external_sort_jsonl
 from .index import INDEX_FORMAT, DuplicateFieldGroup, IndexRecord, ManifestIndex
-from .manifest import MANIFEST_FORMAT, Manifest, build_manifest
+from .manifest import MANIFEST_FORMAT, Manifest, RecordEntry, build_manifest
 from .pipeline import PipelineReport, PipelineStep, drop_fields, rename_field, run_pipeline, select_fields
 from .plan import PLAN_FORMAT, PipelinePlan, PlanStep, load_pipeline_plan
 from .privacy import PrivacyConfig, privacy_packs
@@ -65,6 +65,7 @@ __all__ = [
     "PrivacyConfig",
     "ReaderAdapter",
     "Record",
+    "RecordEntry",
     "SchemaCompatibilityIssue",
     "SchemaCompatibilityReport",
     "SchemaValidationIssue",

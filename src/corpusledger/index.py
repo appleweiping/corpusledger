@@ -4,22 +4,30 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import sqlite3
 import tempfile
+from collections.abc import Iterable
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from types import TracebackType
 
 from .canonical import CanonicalPolicy, canonical_json
-from .manifest import Manifest
+from .manifest import Manifest, RecordEntry
 
 INDEX_FORMAT = "corpusledger-index/1"
+_HEX_DIGEST = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _manifest_digest(manifest: Manifest) -> str:
     payload = (canonical_json(manifest.to_dict(), CanonicalPolicy(unicode_form="none")) + "\n").encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _validate_digest(value: str, name: str) -> None:
+    if not isinstance(value, str) or _HEX_DIGEST.fullmatch(value) is None:
+        raise ValueError(f"{name} must be a 64-character lowercase hexadecimal digest")
 
 
 @dataclass(frozen=True, slots=True)
@@ -85,6 +93,38 @@ class ManifestIndex:
 
         if not isinstance(manifest, Manifest):
             raise TypeError("manifest must be a Manifest")
+        return cls.build_stream(
+            manifest.records,
+            path,
+            manifest_digest=_manifest_digest(manifest),
+            corpus_hash=manifest.corpus_hash,
+            record_count=len(manifest.records),
+        )
+
+    @classmethod
+    def build_stream(
+        cls,
+        entries: Iterable[RecordEntry],
+        path: str | Path,
+        *,
+        manifest_digest: str,
+        corpus_hash: str,
+        record_count: int,
+    ) -> ManifestIndex:
+        """Build an index from a one-pass record-entry stream.
+
+        This is the bounded-memory counterpart to :meth:`build`: callers that
+        already validate a large manifest in a database or JSONL pipeline can
+        stream :class:`~corpusledger.manifest.RecordEntry` values without
+        materializing a complete :class:`Manifest`. The supplied digest and
+        corpus hash must come from that authenticated manifest; ``verify`` can
+        still be used later with a fully loaded manifest.
+        """
+
+        _validate_digest(manifest_digest, "manifest_digest")
+        _validate_digest(corpus_hash, "corpus_hash")
+        if isinstance(record_count, bool) or not isinstance(record_count, int) or record_count < 0:
+            raise ValueError("record_count must be a non-negative integer")
         destination = Path(path).resolve()
         destination.parent.mkdir(parents=True, exist_ok=True)
         descriptor, temporary = tempfile.mkstemp(prefix=f".{destination.name}.", suffix=".tmp", dir=destination.parent)
@@ -93,29 +133,36 @@ class ManifestIndex:
             connection = sqlite3.connect(temporary)
             try:
                 _create_schema(connection)
-                digest = _manifest_digest(manifest)
+                count = 0
                 with connection:
-                    connection.executemany(
-                        "INSERT INTO records(record_id,record_hash,source,position) VALUES(?,?,?,?)",
-                        ((entry.record_id, entry.hash, entry.source, entry.position) for entry in manifest.records),
-                    )
-                    connection.executemany(
-                        "INSERT INTO fields(record_id,path,field_hash) VALUES(?,?,?)",
-                        (
-                            (entry.record_id, path_value, field_hash)
-                            for entry in manifest.records
-                            for path_value, field_hash in sorted(entry.field_hashes.items())
-                        ),
-                    )
+                    for entry in entries:
+                        if not isinstance(entry, RecordEntry):
+                            raise TypeError("entries must contain RecordEntry values")
+                        connection.execute(
+                            "INSERT INTO records(record_id,record_hash,source,position) VALUES(?,?,?,?)",
+                            (entry.record_id, entry.hash, entry.source, entry.position),
+                        )
+                        connection.executemany(
+                            "INSERT INTO fields(record_id,path,field_hash) VALUES(?,?,?)",
+                            (
+                                (entry.record_id, path_value, field_hash)
+                                for path_value, field_hash in sorted(entry.field_hashes.items())
+                            ),
+                        )
+                        count += 1
+                    if count != record_count:
+                        raise ValueError(f"record stream yielded {count} entries; expected {record_count}")
                     connection.executemany(
                         "INSERT INTO metadata(key,value) VALUES(?,?)",
                         (
                             ("format", INDEX_FORMAT),
-                            ("manifest_digest", digest),
-                            ("corpus_hash", manifest.corpus_hash),
-                            ("record_count", str(len(manifest.records))),
+                            ("manifest_digest", manifest_digest),
+                            ("corpus_hash", corpus_hash),
+                            ("record_count", str(record_count)),
                         ),
                     )
+            except sqlite3.IntegrityError as error:
+                raise ValueError(f"cannot build manifest index: {error}") from error
             finally:
                 connection.close()
             os.replace(temporary, destination)

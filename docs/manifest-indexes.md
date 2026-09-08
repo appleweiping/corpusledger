@@ -19,6 +19,14 @@ versioned (`corpusledger-index/1`). `verify-index` checks the exact canonical
 manifest digest, corpus hash, record count, every record's source/position/hash,
 and every indexed field path.
 
+When the manifest's record metadata cannot fit in memory, callers that already
+stream validated `RecordEntry` values can use `ManifestIndex.build_stream()`.
+It accepts a one-pass iterable plus the authenticated manifest digest, corpus
+hash, and expected record count; the SQLite writer retains no complete record
+list and rejects identity/count mismatches before replacing the destination.
+The resulting index has the same format and can be verified later against a
+fully loaded `Manifest`.
+
 ## Query metadata
 
 ```console
@@ -44,3 +52,15 @@ with ManifestIndex("release.index.db") as index:
         print(row.record_id, row.source, row.position)
 ```
 
+For a database-backed or JSONL manifest pipeline, the bounded form is:
+
+```python
+with ManifestIndex.build_stream(
+    stream_record_entries(),
+    "release.index.db",
+    manifest_digest=authenticated_manifest_digest,
+    corpus_hash=authenticated_corpus_hash,
+    record_count=authenticated_record_count,
+) as index:
+    print(index.stats())
+```

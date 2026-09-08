@@ -40,6 +40,56 @@ def test_manifest_index_builds_queries_and_verifies(tmp_path: Path) -> None:
         index.stats()  # type: ignore[union-attr]
 
 
+def test_manifest_index_build_stream_accepts_one_pass_entries(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    reference_path = tmp_path / "reference.db"
+    with ManifestIndex.build(manifest, reference_path) as reference:
+        digest = reference.manifest_digest
+        corpus_hash = reference.corpus_hash
+    calls = 0
+
+    def entries():
+        nonlocal calls
+        for entry in manifest.records:
+            calls += 1
+            yield entry
+
+    stream_path = tmp_path / "stream.db"
+    with ManifestIndex.build_stream(
+        entries(),
+        stream_path,
+        manifest_digest=digest,
+        corpus_hash=corpus_hash,
+        record_count=2,
+    ) as index:
+        assert calls == 2
+        assert index.record_count == 2
+        index.verify(manifest)
+        assert [row.record_id for row in index.query(id_prefix="b")] == ["beta"]
+
+
+def test_manifest_index_build_stream_rejects_identity_and_count_errors(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    path = tmp_path / "stream.db"
+    with pytest.raises(ValueError, match="manifest_digest"):
+        ManifestIndex.build_stream(
+            iter(manifest.records),
+            path,
+            manifest_digest="bad",
+            corpus_hash=manifest.corpus_hash,
+            record_count=2,
+        )
+    with pytest.raises(ValueError, match="yielded 2 entries; expected 1"):
+        ManifestIndex.build_stream(
+            iter(manifest.records),
+            path,
+            manifest_digest="0" * 64,
+            corpus_hash=manifest.corpus_hash,
+            record_count=1,
+        )
+    assert not path.exists()
+
+
 def test_manifest_index_detects_manifest_mismatch_and_bad_filters(tmp_path: Path) -> None:
     manifest = _manifest(tmp_path, 1)
     changed = _manifest(tmp_path, 3)
