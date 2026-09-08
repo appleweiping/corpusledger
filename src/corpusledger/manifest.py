@@ -79,12 +79,16 @@ class Manifest:
     schema: dict[str, Any]
     privacy_findings: tuple[dict[str, Any], ...]
     reader_metadata: dict[str, str] | None = None
+    excluded_paths: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return a serializable representation."""
         result = asdict(self)
         if self.reader_metadata is None:
             result.pop("reader_metadata")
+        result.pop("excluded_paths")
+        if self.excluded_paths:
+            result["excluded_paths"] = list(self.excluded_paths)
         result["records"] = [asdict(record) for record in self.records]
         result["privacy_findings"] = list(self.privacy_findings)
         return result
@@ -135,6 +139,7 @@ class Manifest:
             policy = CanonicalPolicy.from_dict(hash_metadata["policy"])
             privacy_metadata = _validate_privacy_metadata(raw["privacy_metadata"])
             reader_metadata = _validate_reader_metadata(raw.get("reader_metadata"))
+            excluded_paths = _validate_excluded_paths(raw.get("excluded_paths", []))
             corpus_hash = _validate_digest(raw["corpus_hash"], "corpus_hash")
             order_hash = _validate_digest(raw["order_hash"], "order_hash")
             files = _validate_hash_mapping(raw["files"], "files")
@@ -154,6 +159,7 @@ class Manifest:
                 schema=schema,
                 privacy_findings=findings,
                 reader_metadata=reader_metadata,
+                excluded_paths=excluded_paths,
             )
         except (InputError, KeyError, TypeError, ValueError) as exc:
             raise ManifestError(f"invalid manifest structure in {path}: {exc}") from exc
@@ -222,6 +228,16 @@ def _validate_reader_metadata(value: Any) -> dict[str, str] | None:
         raise ValueError("reader_metadata has missing or unknown fields")
     name, version = validate_reader_identity(metadata_value.get("name"), metadata_value.get("version"))
     return {"name": name, "version": version}
+
+
+def _validate_excluded_paths(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError("excluded_paths must be an array of strings")
+    if any(not item or item != item.strip() for item in value):
+        raise ValueError("excluded_paths must contain non-empty trimmed strings")
+    if len(set(value)) != len(value):
+        raise ValueError("excluded_paths must not contain duplicates")
+    return tuple(value)
 
 
 def _validate_record_entries(value: Any, policy: CanonicalPolicy) -> tuple[RecordEntry, ...]:
@@ -316,6 +332,8 @@ def build_manifest(
     findings: list[dict[str, Any]] = []
     order_hasher = CanonicalSequenceHasher(policy, algorithm)
     relative_files: dict[str, str] = {}
+    raw_excludes = tuple(exclude_paths)
+    normalized_excludes = _normalize_excluded_paths(root, raw_excludes)
     current_source: str | None = None
     file_hasher: CanonicalSequenceHasher | None = None
 
@@ -329,7 +347,7 @@ def build_manifest(
         root,
         id_field,
         policy=policy,
-        exclude_paths=exclude_paths,
+        exclude_paths=raw_excludes,
         reader=active_reader,
     ):
         if record.source != current_source:
@@ -395,4 +413,20 @@ def build_manifest(
         reader_metadata=(
             {"name": active_reader.name, "version": active_reader.version} if active_reader is not None else None
         ),
+        excluded_paths=normalized_excludes,
     )
+
+
+def _normalize_excluded_paths(root: Path, values: Iterable[str | Path]) -> tuple[str, ...]:
+    """Record deterministic exclusion names relative to the snapshot root."""
+
+    base = root if root.is_dir() else root.parent
+    normalized: set[str] = set()
+    for value in values:
+        path = Path(value).resolve()
+        try:
+            rendered = path.relative_to(base).as_posix()
+        except ValueError:
+            rendered = path.as_posix()
+        normalized.add(rendered)
+    return tuple(sorted(normalized))

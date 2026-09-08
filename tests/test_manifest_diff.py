@@ -189,6 +189,17 @@ def test_reader_metadata_and_numeric_manifest_boundaries_are_strict(tmp_path: Pa
         Manifest.load(path)
 
 
+def test_manifest_rejects_invalid_exclusion_metadata(tmp_path: Path) -> None:
+    source = tmp_path / "data.jsonl"
+    corpus(source, [{"id": "1"}])
+    raw = build_manifest(source).to_dict()
+    raw["excluded_paths"] = ["ok", "ok"]
+    path = tmp_path / "invalid.manifest.json"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(ManifestError, match="excluded_paths"):
+        Manifest.load(path)
+
+
 def test_markdown_escapes_untrusted_manifest_identifiers(tmp_path: Path) -> None:
     source = tmp_path / "data.jsonl"
     corpus(source, [{"id": "safe"}])

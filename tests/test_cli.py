@@ -144,6 +144,20 @@ def test_directory_snapshot_excludes_its_output_and_rejects_overwrite(tmp_path: 
         run(["snapshot", str(source), str(other_data)])
 
 
+def test_directory_snapshot_records_custom_exclusions_and_verifies_them(tmp_path: Path) -> None:
+    source = tmp_path / "corpus"
+    source.mkdir()
+    (source / "data.jsonl").write_text('{"id":"a"}\n', encoding="utf-8")
+    ignored = source / "ignored.jsonl"
+    ignored.write_text('{"id":"ignored"}\n', encoding="utf-8")
+    manifest = source / "snapshot.json"
+    assert run(["snapshot", str(source), str(manifest), "--exclude", str(ignored)]) == 0
+    raw = json.loads(manifest.read_text(encoding="utf-8"))
+    assert raw["excluded_paths"] == ["ignored.jsonl", "snapshot.json"]
+    assert [record["record_id"] for record in raw["records"]] == ["a"]
+    assert run(["verify", str(manifest)]) == 0
+
+
 def test_cli_explicit_reader_is_recorded_and_required_for_verification(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

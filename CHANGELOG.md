@@ -4,6 +4,10 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add reproducible `snapshot --exclude` path configuration. Exact exclusions
+  are persisted in manifests and reused by `verify`, while legacy manifests
+  remain loadable without migration.
+
 - Add `ManifestIndex.build_stream()` for atomically building digest-bound SQLite
   indexes from one-pass validated `RecordEntry` streams without materializing a
   complete `Manifest` in memory.

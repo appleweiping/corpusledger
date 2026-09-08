@@ -48,6 +48,12 @@ def _parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--id-field", default="id")
     snapshot.add_argument("--algorithm", choices=("sha256", "blake2b"), default="sha256")
     snapshot.add_argument("--privacy-pack", choices=privacy_packs(), default="default")
+    snapshot.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        help="exclude an exact file path from a directory snapshot (repeatable)",
+    )
     snapshot.add_argument("--sort-lists", action="store_true", help="treat lists as set-like (use with care)")
     snapshot.add_argument(
         "--sort-path",
@@ -282,7 +288,7 @@ def run(argv: list[str] | None = None) -> int:
             algorithm=args.algorithm,
             policy=policy,
             privacy=PrivacyConfig.from_pack(args.privacy_pack),
-            exclude_paths=(output_path,),
+            exclude_paths=(output_path, *tuple(Path(item).resolve() for item in args.exclude)),
             reader=_reader(args.reader),
         )
         manifest.save(args.output)
@@ -555,7 +561,7 @@ def run(argv: list[str] | None = None) -> int:
         algorithm=algorithm,
         policy=policy,
         privacy=privacy,
-        exclude_paths=(args.manifest,),
+        exclude_paths=_verification_exclusions(existing, source, Path(args.manifest)),
         reader=reader,
     )
     mismatches = _manifest_mismatches(existing, rebuilt)
@@ -580,8 +586,19 @@ def _manifest_mismatches(existing: Manifest, rebuilt: Manifest) -> list[str]:
         "schema",
         "privacy_findings",
         "reader_metadata",
+        "excluded_paths",
     )
     return [name for name in fields if getattr(existing, name) != getattr(rebuilt, name)]
+
+
+def _verification_exclusions(existing: Manifest, source: str, manifest_path: Path) -> tuple[Path, ...]:
+    root = Path(source).resolve()
+    base = root if root.is_dir() else root.parent
+    values = [manifest_path.resolve()]
+    for value in existing.excluded_paths:
+        candidate = Path(value)
+        values.append(candidate if candidate.is_absolute() else (base / candidate).resolve())
+    return tuple(dict.fromkeys(values))
 
 
 def _run_stream(args: argparse.Namespace) -> int:

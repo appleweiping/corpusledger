@@ -364,7 +364,8 @@ wheel smoke tests on Linux, Windows, and macOS.
 - JSON Schema export is available through the `corpusledger schema manifest`
   command, and `schema-compat` checks backward/forward/full compatibility;
 - Sigstore-compatible keyless attestations and transparency-log integration;
-- configurable path exclusion and privacy rule packs;
+- configurable path exclusion and privacy rule packs; `snapshot --exclude`
+  records exact exclusions in the manifest so verification reproduces them;
 - maintained adapters for columnar and remote object-store formats in separate packages.
 
 ## License and security

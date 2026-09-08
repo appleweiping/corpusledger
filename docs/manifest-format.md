@@ -20,6 +20,7 @@ missing record-entry, hash-metadata, and privacy-metadata keys are invalid.
 | `schema` | Observed record count and field summaries |
 | `privacy_findings` | Sorted, redacted heuristic findings |
 | `reader_metadata` | Optional explicit third-party reader `name` and `version`; omitted for built-ins |
+| `excluded_paths` | Optional sorted exact paths excluded from the snapshot; omitted when empty |
 
 Each record entry has `record_id`, content `hash`, relative `source`, one-based `position`, and `field_hashes`. A field
 hash reveals equality/change but not the original value. Object leaves use RFC 6901 JSON Pointer paths; arrays are a
@@ -40,11 +41,13 @@ documented 4,300-digit resource limit. Hashes are lowercase hexadecimal. Impleme
 different hash, privacy, or reader metadata. The content hashes are location-independent, while the top-level absolute
 `source` means full manifest bytes are intentionally location-specific.
 
-`reader_metadata` is an additive top-level extension permitted by the original version-1 forward-compatibility rule.
-Consequently, existing version-1 manifests need no migration and load/save without acquiring the field. A manifest that
-records a reader adapter must be rebuilt with the exact recorded name and version. Nested reader metadata is strict and
-accepts only those two non-empty strings, without surrounding whitespace, control/format characters, or surrogate code
-points.
+`reader_metadata` and `excluded_paths` are additive top-level extensions permitted by the original version-1
+forward-compatibility rule. Consequently, existing version-1 manifests need no migration and load/save without
+acquiring either field. A manifest that records a reader adapter must be rebuilt with the exact recorded name and
+version. Nested reader metadata is strict and accepts only those two non-empty strings, without surrounding whitespace,
+control/format characters, or surrogate code points. Exclusion entries are exact file paths, sorted and deduplicated;
+relative entries are resolved against the verification source root, while external absolute entries remain tied to their
+recorded location.
 
 ## Detached signature envelope
 
