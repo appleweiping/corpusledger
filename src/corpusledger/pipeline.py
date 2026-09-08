@@ -78,17 +78,7 @@ def _path_digest(path: Path, policy: CanonicalPolicy, exclude_paths: Iterable[Pa
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 digest.update(chunk)
     # Include policy because normalization affects IDs and downstream semantics.
-    digest.update(
-        canonical_json(
-            policy.__dict__
-            if hasattr(policy, "__dict__")
-            else {
-                "unicode_form": policy.unicode_form,
-                "list_strategy": policy.list_strategy,
-            },
-            CanonicalPolicy(unicode_form="none"),
-        ).encode()
-    )
+    digest.update(canonical_json(policy.to_dict(), CanonicalPolicy(unicode_form="none")).encode())
     return digest.hexdigest()
 
 

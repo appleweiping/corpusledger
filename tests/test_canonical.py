@@ -19,6 +19,16 @@ def test_list_policy_and_special_python_values() -> None:
     assert canonical_json([2, 1], CanonicalPolicy(list_strategy="sort")) == "[1,2]"
 
 
+def test_per_field_list_policy_sorts_only_selected_paths() -> None:
+    policy = CanonicalPolicy(sort_paths=("labels", "metadata.languages"))
+    value = {
+        "labels": ["z", "a"],
+        "metadata": {"languages": ["fr", "en"], "turns": [2, 1]},
+    }
+    assert canonical_json(value, policy) == ('{"labels":["a","z"],"metadata":{"languages":["en","fr"],"turns":[2,1]}}')
+    assert CanonicalPolicy(sort_paths=("labels",)).to_dict()["sort_paths"] == ["labels"]
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf")])
 def test_non_finite_rejected(value: float) -> None:
     with pytest.raises(CanonicalizationError, match="NaN and infinity"):

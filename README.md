@@ -121,6 +121,11 @@ corpusledger schema examples/out/before.manifest.json --title support-corpus --o
 See [Observed schema export](docs/schema-export.md) for the conservative
 draft-2020-12 mapping and service request shape.
 
+For mixed records, `--sort-path labels --sort-path metadata.languages` sorts
+only those set-like lists while preserving every other list. The selected
+paths are authenticated in the manifest policy; see [per-field list-order
+policies](docs/list-order-policies.md).
+
 Verify that a recorded source still matches every derived manifest section:
 
 ```bash
@@ -336,7 +341,7 @@ wheel smoke tests on Linux, Windows, and macOS.
 
 ## Roadmap
 
-- per-field list-order policies with an external-sort implementation;
+- an external-sort implementation for per-field policies on very large lists;
 - bounded-size or external manifest indexes for corpora whose manifest metadata itself exceeds memory;
 - JSON Schema export is available through the `corpusledger schema manifest`
   command; compatibility validation modes remain future work;

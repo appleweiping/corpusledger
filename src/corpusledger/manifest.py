@@ -132,7 +132,7 @@ class Manifest:
             source = _required_text(raw, "source")
             id_field = _required_text(raw, "id_field")
             hash_metadata = _validate_hash_metadata(raw["hash_metadata"])
-            policy = CanonicalPolicy(**hash_metadata["policy"])
+            policy = CanonicalPolicy.from_dict(hash_metadata["policy"])
             privacy_metadata = _validate_privacy_metadata(raw["privacy_metadata"])
             reader_metadata = _validate_reader_metadata(raw.get("reader_metadata"))
             corpus_hash = _validate_digest(raw["corpus_hash"], "corpus_hash")
@@ -193,7 +193,7 @@ def _validate_hash_metadata(value: Any) -> dict[str, Any]:
     if metadata_value["canonical_version"] != CANONICAL_VERSION:
         raise ValueError("hash_metadata.canonical_version is unsupported")
     policy_value = _required_mapping(metadata_value["policy"], "hash_metadata.policy")
-    policy = CanonicalPolicy(**policy_value)
+    policy = CanonicalPolicy.from_dict(policy_value)
     return {
         "algorithm": algorithm,
         "canonical_version": CANONICAL_VERSION,

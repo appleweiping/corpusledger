@@ -48,6 +48,12 @@ def _parser() -> argparse.ArgumentParser:
     snapshot.add_argument("--algorithm", choices=("sha256", "blake2b"), default="sha256")
     snapshot.add_argument("--sort-lists", action="store_true", help="treat lists as set-like (use with care)")
     snapshot.add_argument(
+        "--sort-path",
+        action="append",
+        default=[],
+        help="sort only the list at this dotted field path (repeatable)",
+    )
+    snapshot.add_argument(
         "--reader",
         help="explicit corpusledger.readers entry point (third-party code is loaded only when named)",
     )
@@ -252,7 +258,10 @@ def run(argv: list[str] | None = None) -> int:
                 Manifest.load(output_path)
             except ManifestError as exc:
                 raise InputError("snapshot output already exists and is not a CorpusLedger manifest") from exc
-        policy = CanonicalPolicy(list_strategy="sort" if args.sort_lists else "preserve")
+        policy = CanonicalPolicy(
+            list_strategy="sort" if args.sort_lists else "preserve",
+            sort_paths=tuple(args.sort_path),
+        )
         manifest = build_manifest(
             input_path,
             id_field=args.id_field,
@@ -498,7 +507,7 @@ def run(argv: list[str] | None = None) -> int:
     )
     algorithm = existing.hash_metadata["algorithm"]
     policy_data = existing.hash_metadata["policy"]
-    policy = CanonicalPolicy(**policy_data)
+    policy = CanonicalPolicy.from_dict(policy_data)
     privacy = PrivacyConfig.from_dict(existing.privacy_metadata["config"])
     reader = _verification_reader(existing, args.reader)
     rebuilt = build_manifest(

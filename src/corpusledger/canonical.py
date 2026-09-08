@@ -25,6 +25,7 @@ class CanonicalPolicy:
 
     unicode_form: Literal["NFC", "NFKC", "none"] = "NFC"
     list_strategy: ListStrategy = "preserve"
+    sort_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         """Reject invalid runtime policy values that static typing cannot prevent."""
@@ -32,13 +33,34 @@ class CanonicalPolicy:
             raise ValueError(f"unsupported Unicode normalization form: {self.unicode_form}")
         if self.list_strategy not in {"preserve", "sort"}:
             raise ValueError(f"unsupported list strategy: {self.list_strategy}")
+        if not isinstance(self.sort_paths, tuple) or not all(
+            isinstance(path, str) and path.strip() for path in self.sort_paths
+        ):
+            raise ValueError("sort_paths must be a tuple of non-empty dotted paths")
+        if len(set(self.sort_paths)) != len(self.sort_paths):
+            raise ValueError("sort_paths must not contain duplicates")
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible policy description."""
-        return {
+        result: dict[str, Any] = {
             "list_strategy": self.list_strategy,
             "unicode_form": self.unicode_form,
         }
+        if self.sort_paths:
+            result["sort_paths"] = list(self.sort_paths)
+        return result
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> CanonicalPolicy:
+        """Load serialized policy metadata, normalizing JSON arrays to tuples."""
+
+        payload = dict(value)
+        if "sort_paths" in payload:
+            paths = payload["sort_paths"]
+            if not isinstance(paths, list):
+                raise ValueError("sort_paths must be a JSON array")
+            payload["sort_paths"] = tuple(paths)
+        return cls(**payload)
 
 
 def _normalize_string(value: str, policy: CanonicalPolicy, *, path: str) -> str:
@@ -96,10 +118,16 @@ def canonicalize(value: Any, policy: CanonicalPolicy | None = None, *, path: str
         return {key: normalized[key] for key in sorted(normalized)}
     if isinstance(value, list):
         normalized_items = [canonicalize(item, policy, path=f"{path}[{i}]") for i, item in enumerate(value)]
-        if policy.list_strategy == "sort":
+        if policy.list_strategy == "sort" or _path_is_sorted(path, policy.sort_paths):
             normalized_items.sort(key=lambda item: canonical_json(item, policy))
         return normalized_items
     raise CanonicalizationError(f"{path}: unsupported value type {type(value).__name__}")
+
+
+def _path_is_sorted(path: str, selectors: tuple[str, ...]) -> bool:
+    """Match user-facing dotted paths against canonicalizer's diagnostic path."""
+
+    return any(path == "$" + ("." + selector if not selector.startswith("$") else selector) for selector in selectors)
 
 
 def canonical_json(value: Any, policy: CanonicalPolicy | None = None) -> str:

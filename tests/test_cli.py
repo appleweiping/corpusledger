@@ -28,6 +28,16 @@ def test_snapshot_verify_and_diff_end_to_end(tmp_path: Path, capsys: object) -> 
     assert json.loads(report.read_text(encoding="utf-8"))["changed_records"]["a"]
 
 
+def test_snapshot_supports_per_field_sort_paths(tmp_path: Path) -> None:
+    source = tmp_path / "corpus.jsonl"
+    source.write_text('{"id":"a","labels":["z","a"],"turns":[2,1]}\n', encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    assert run(["snapshot", str(source), str(manifest), "--sort-path", "labels"]) == 0
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["hash_metadata"]["policy"]["sort_paths"] == ["labels"]
+    assert run(["verify", str(manifest)]) == 0
+
+
 def test_stream_cli_emits_one_response_per_request_and_writes_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
