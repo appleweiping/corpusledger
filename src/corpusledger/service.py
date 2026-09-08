@@ -58,6 +58,35 @@ class CorpusService:
                     privacy=PrivacyConfig.from_pack(privacy_pack),
                 ).to_dict(),
             }
+        if operation == "verify":
+            manifest_path = _required_path(request, "manifest")
+            existing = Manifest.load(manifest_path)
+            source_value = request.get("input", existing.source)
+            if not isinstance(source_value, str) or not source_value.strip():
+                raise ValueError("input must be a non-empty path string when supplied")
+            source = Path(source_value)
+            if source.resolve() == manifest_path.resolve():
+                raise ValueError("verification input must not be the manifest itself")
+            base = source.resolve() if source.resolve().is_dir() else source.resolve().parent
+            exclusions: list[Path] = []
+            for excluded in existing.excluded_paths:
+                candidate = Path(excluded)
+                exclusions.append(candidate if candidate.is_absolute() else base / candidate)
+            rebuilt = build_manifest(
+                source,
+                id_field=existing.id_field,
+                algorithm=existing.hash_metadata["algorithm"],
+                policy=CanonicalPolicy.from_dict(existing.hash_metadata["policy"]),
+                privacy=PrivacyConfig.from_dict(existing.privacy_metadata["config"]),
+                exclude_paths=tuple(dict.fromkeys(exclusions)),
+            )
+            mismatches = _manifest_mismatches(existing, rebuilt)
+            return {
+                "operation": operation,
+                "verified": not mismatches,
+                "records": len(rebuilt.records),
+                "mismatches": mismatches,
+            }
         if operation == "diff":
             before = Manifest.load(_required_path(request, "before"))
             after = Manifest.load(_required_path(request, "after"))
@@ -148,7 +177,7 @@ class CorpusService:
             return _catalog_request(request)
         raise ValueError(
             "operation must be one of: manifest, diff, index_query, verify_bundle, schema, "
-            "schema_validate, schema_compat, sort_jsonl, catalog"
+            "schema_validate, schema_compat, sort_jsonl, verify, catalog"
         )
 
 
@@ -214,6 +243,24 @@ def _schema_request_value(request: Mapping[str, Any], name: str) -> Mapping[str,
     if not isinstance(value, Mapping):
         raise ValueError(f"{name} must be a schema object or path string")
     return value
+
+
+def _manifest_mismatches(existing: Manifest, rebuilt: Manifest) -> list[str]:
+    fields = (
+        "format",
+        "id_field",
+        "hash_metadata",
+        "privacy_metadata",
+        "corpus_hash",
+        "order_hash",
+        "files",
+        "records",
+        "schema",
+        "privacy_findings",
+        "reader_metadata",
+        "excluded_paths",
+    )
+    return [name for name in fields if getattr(existing, name) != getattr(rebuilt, name)]
 
 
 def _catalog_request(request: Mapping[str, Any]) -> dict[str, Any]:

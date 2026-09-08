@@ -53,6 +53,25 @@ def test_service_manifest_accepts_privacy_pack(tmp_path) -> None:
         CorpusService().dispatch({"operation": "manifest", "input": str(source), "privacy_pack": "bad"})
 
 
+def test_service_verifies_and_reports_manifest_drift(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"a","text":"hello"}\n', encoding="utf-8")
+    manifest_path = tmp_path / "manifest.json"
+    build_manifest(source).save(manifest_path)
+    service = CorpusService()
+    verified = service.dispatch({"operation": "verify", "manifest": str(manifest_path)})
+    assert verified["verified"] is True
+    assert verified["mismatches"] == []
+    explicit = service.dispatch({"operation": "verify", "manifest": str(manifest_path), "input": str(source)})
+    assert explicit["verified"] is True
+    with pytest.raises(ValueError, match="must not be the manifest"):
+        service.dispatch({"operation": "verify", "manifest": str(manifest_path), "input": str(manifest_path)})
+    source.write_text('{"id":"a","text":"changed"}\n', encoding="utf-8")
+    drift = service.dispatch({"operation": "verify", "manifest": str(manifest_path)})
+    assert drift["verified"] is False
+    assert "records" in drift["mismatches"]
+
+
 def test_service_external_sort_operation(tmp_path) -> None:
     source = tmp_path / "records.jsonl"
     output = tmp_path / "sorted.jsonl"

@@ -17,8 +17,11 @@ The equivalent command-line entry point is:
 corpusledger serve --host 127.0.0.1 --port 8080
 ```
 
-Requests use an explicit `operation` (`manifest`, `diff`, `index_query`,
-`verify_bundle`, or `catalog`) and filesystem paths. `index_query` accepts an
+Requests use an explicit `operation` (`manifest`, `verify`, `diff`, `index_query`,
+`verify_bundle`, or `catalog`) and filesystem paths. `verify` rebuilds a
+manifest using its authenticated hash, canonical, privacy, and exclusion
+metadata, returning named mismatches instead of a boolean-only failure.
+`index_query` accepts an
 authenticated SQLite manifest index plus the same bounded filters as the CLI,
 including the exclusive `after_id` cursor. The `catalog` operation accepts `list`,
 `register`, `lineage`, and `diff` actions over the same transactional snapshot
