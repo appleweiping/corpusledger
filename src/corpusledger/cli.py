@@ -25,7 +25,7 @@ from .index import ManifestIndex
 from .manifest import Manifest, build_manifest
 from .pipeline import drop_fields, rename_field, run_pipeline, select_fields
 from .plan import load_pipeline_plan
-from .privacy import PrivacyConfig
+from .privacy import PrivacyConfig, privacy_packs
 from .readers import ReaderAdapter, iter_corpus, load_reader_adapter
 from .reporting import render
 from .schema import compare_json_schemas, to_json_schema, validate_json_schema
@@ -47,6 +47,7 @@ def _parser() -> argparse.ArgumentParser:
     snapshot.add_argument("output")
     snapshot.add_argument("--id-field", default="id")
     snapshot.add_argument("--algorithm", choices=("sha256", "blake2b"), default="sha256")
+    snapshot.add_argument("--privacy-pack", choices=privacy_packs(), default="default")
     snapshot.add_argument("--sort-lists", action="store_true", help="treat lists as set-like (use with care)")
     snapshot.add_argument(
         "--sort-path",
@@ -280,6 +281,7 @@ def run(argv: list[str] | None = None) -> int:
             id_field=args.id_field,
             algorithm=args.algorithm,
             policy=policy,
+            privacy=PrivacyConfig.from_pack(args.privacy_pack),
             exclude_paths=(output_path,),
             reader=_reader(args.reader),
         )

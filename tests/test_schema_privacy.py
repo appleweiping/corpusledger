@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from corpusledger.privacy import PrivacyConfig, scan_records, shannon_entropy
+from corpusledger.privacy import PrivacyConfig, privacy_packs, scan_records, shannon_entropy
 from corpusledger.schema import infer_schema, schema_drift, to_json_schema, validate_json_schema
 
 
@@ -154,6 +154,17 @@ def test_privacy_scan_redacts_values() -> None:
 def test_custom_privacy_config() -> None:
     findings = scan_records([("x", {"private_note": "short"})], PrivacyConfig(frozenset({"private_note"}), 100, 9.0))
     assert findings == [{"kind": "sensitive_field_name", "path": "/private_note", "record_id": "x"}]
+
+
+def test_privacy_rule_packs_are_named_and_deterministic() -> None:
+    assert privacy_packs() == ("credentials", "default", "pii")
+    credentials = PrivacyConfig.from_pack("credentials")
+    pii = PrivacyConfig.from_pack("pii")
+    assert "client_secret" in credentials.sensitive_names
+    assert "email" in pii.sensitive_names
+    assert PrivacyConfig.from_pack().to_dict() == PrivacyConfig().to_dict()
+    with pytest.raises(ValueError, match="unknown privacy pack"):
+        PrivacyConfig.from_pack("unknown")
 
 
 @pytest.mark.parametrize(

@@ -44,6 +44,15 @@ def test_service_manifest_accepts_selective_sort_policy(tmp_path) -> None:
     assert result["manifest"]["hash_metadata"]["policy"]["sort_paths"] == ["labels"]
 
 
+def test_service_manifest_accepts_privacy_pack(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"a","email":"a@example.test"}\n', encoding="utf-8")
+    result = CorpusService().dispatch({"operation": "manifest", "input": str(source), "privacy_pack": "pii"})
+    assert result["manifest"]["privacy_metadata"]["config"]["sensitive_names"]
+    with pytest.raises(ValueError, match="unknown privacy pack"):
+        CorpusService().dispatch({"operation": "manifest", "input": str(source), "privacy_pack": "bad"})
+
+
 def test_service_external_sort_operation(tmp_path) -> None:
     source = tmp_path / "records.jsonl"
     output = tmp_path / "sorted.jsonl"

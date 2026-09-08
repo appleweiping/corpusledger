@@ -25,6 +25,10 @@ authenticated reverse proxy before exposing the process outside a trusted
 machine. Request bodies are bounded at 4 MiB and all operations reuse the
 library's strict parsing and digest verification.
 
+The `manifest` operation accepts an optional `privacy_pack` string: `default`,
+`credentials`, or `pii`. The selected deterministic scanner configuration is
+stored in the manifest's privacy metadata.
+
 For independent processors (including clients written in Java or Go),
 `NdjsonGateway` provides a transport-neutral record protocol. Register a named
 callable, then pass UTF-8 JSON lines containing `processor` and object `payload`.

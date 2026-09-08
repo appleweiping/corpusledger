@@ -9,7 +9,7 @@ from .index import INDEX_FORMAT, DuplicateFieldGroup, IndexRecord, ManifestIndex
 from .manifest import MANIFEST_FORMAT, Manifest, build_manifest
 from .pipeline import PipelineReport, PipelineStep, drop_fields, rename_field, run_pipeline, select_fields
 from .plan import PLAN_FORMAT, PipelinePlan, PlanStep, load_pipeline_plan
-from .privacy import PrivacyConfig
+from .privacy import PrivacyConfig, privacy_packs
 from .readers import READER_ENTRY_POINT_GROUP, ReaderAdapter, Record, iter_corpus, load_reader_adapter
 from .schema import (
     SchemaCompatibilityIssue,
@@ -86,6 +86,7 @@ __all__ = [
     "iter_corpus",
     "load_pipeline_plan",
     "load_reader_adapter",
+    "privacy_packs",
     "rename_field",
     "run_pipeline",
     "select_fields",

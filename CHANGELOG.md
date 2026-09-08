@@ -4,6 +4,9 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add deterministic `default`, `credentials`, and `pii` privacy rule packs to
+  the snapshot CLI, local service, and Python API.
+
 - Add conservative backward/forward/full JSON Schema compatibility reports via
   `schema-compat`, the Python API, and the local service.
 - Add bounded-memory canonical JSONL external sorting with chunk merge, atomic output, and digest reports.

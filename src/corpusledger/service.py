@@ -19,6 +19,7 @@ from .catalog import SnapshotCatalog
 from .diff import compare
 from .external_sort import external_sort_jsonl
 from .manifest import Manifest, build_manifest
+from .privacy import PrivacyConfig
 from .readers import iter_corpus
 from .schema import compare_json_schemas, to_json_schema, validate_json_schema
 from .store import verify_bundle
@@ -45,9 +46,16 @@ class CorpusService:
             policy_value = request.get("policy", {})
             if not isinstance(policy_value, Mapping):
                 raise ValueError("policy must be an object")
+            privacy_pack = request.get("privacy_pack", "default")
+            if not isinstance(privacy_pack, str):
+                raise ValueError("privacy_pack must be a string")
             return {
                 "operation": operation,
-                "manifest": build_manifest(source, policy=CanonicalPolicy.from_dict(dict(policy_value))).to_dict(),
+                "manifest": build_manifest(
+                    source,
+                    policy=CanonicalPolicy.from_dict(dict(policy_value)),
+                    privacy=PrivacyConfig.from_pack(privacy_pack),
+                ).to_dict(),
             }
         if operation == "diff":
             before = Manifest.load(_required_path(request, "before"))

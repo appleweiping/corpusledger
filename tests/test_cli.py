@@ -38,6 +38,15 @@ def test_snapshot_supports_per_field_sort_paths(tmp_path: Path) -> None:
     assert run(["verify", str(manifest)]) == 0
 
 
+def test_snapshot_supports_privacy_pack(tmp_path: Path) -> None:
+    source = tmp_path / "corpus.jsonl"
+    source.write_text('{"id":"a","email":"a@example.test"}\n', encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    assert run(["snapshot", str(source), str(manifest), "--privacy-pack", "pii"]) == 0
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert "email" in payload["privacy_metadata"]["config"]["sensitive_names"]
+
+
 def test_stream_cli_emits_one_response_per_request_and_writes_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

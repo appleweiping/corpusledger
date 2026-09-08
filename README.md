@@ -141,6 +141,16 @@ corpusledger verify examples/out/before.manifest.json
 corpusledger verify examples/out/before.manifest.json --input /datasets/release-7
 ```
 
+Select a reviewed privacy rule pack when creating a snapshot:
+
+```bash
+corpusledger snapshot records.jsonl release.manifest.json --privacy-pack credentials
+```
+
+Built-in packs are `default`, `credentials`, and `pii`; the selected scanner
+configuration is authenticated in manifest metadata. The Python API exposes the
+same choices through `PrivacyConfig.from_pack()` and `privacy_packs()`.
+
 Authenticate a manifest with a detached Ed25519 signature. The verifier receives the trusted public key out of band;
 the signature envelope intentionally contains only its SHA-256 fingerprint, never key material:
 

@@ -17,6 +17,27 @@ from typing import Any
 from .paths import join_pointer
 
 DEFAULT_SENSITIVE_NAMES = frozenset({"password", "passwd", "secret", "api_key", "token", "access_token", "ssn"})
+PRIVACY_PACKS = {
+    "default": DEFAULT_SENSITIVE_NAMES,
+    "credentials": DEFAULT_SENSITIVE_NAMES
+    | frozenset({"authorization", "credential", "client_secret", "private_key", "refresh_token", "jwt"}),
+    "pii": DEFAULT_SENSITIVE_NAMES
+    | frozenset(
+        {
+            "address",
+            "date_of_birth",
+            "dob",
+            "email",
+            "first_name",
+            "full_name",
+            "last_name",
+            "phone",
+            "telephone",
+            "zip",
+            "zip_code",
+        }
+    ),
+}
 TOKEN_PATTERN = re.compile(r"^[A-Za-z0-9_+./=-]+$")
 PRIVACY_VERSION = "1"
 
@@ -59,6 +80,21 @@ class PrivacyConfig:
         }
 
     @classmethod
+    def from_pack(
+        cls,
+        pack: str = "default",
+        *,
+        min_token_length: int = 24,
+        entropy_threshold: float = 3.7,
+    ) -> PrivacyConfig:
+        """Build a named, deterministic privacy rule pack."""
+
+        if not isinstance(pack, str) or pack not in PRIVACY_PACKS:
+            choices = ", ".join(sorted(PRIVACY_PACKS))
+            raise ValueError(f"unknown privacy pack {pack!r}; choose one of: {choices}")
+        return cls(PRIVACY_PACKS[pack], min_token_length, entropy_threshold)
+
+    @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> PrivacyConfig:
         """Build a validated configuration from manifest metadata."""
         required = {"entropy_threshold", "min_token_length", "sensitive_names"}
@@ -74,6 +110,12 @@ class PrivacyConfig:
         if isinstance(threshold, bool) or not isinstance(threshold, (int, float)):
             raise ValueError("privacy entropy_threshold must be numeric")
         return cls(frozenset(names), length, float(threshold))
+
+
+def privacy_packs() -> tuple[str, ...]:
+    """Return stable names of built-in privacy rule packs."""
+
+    return tuple(sorted(PRIVACY_PACKS))
 
 
 def shannon_entropy(text: str) -> float:
