@@ -7,7 +7,7 @@ from urllib.error import HTTPError
 
 import pytest
 
-from corpusledger import CorpusService, build_manifest, bundle_snapshot, create_server
+from corpusledger import CorpusService, ManifestIndex, build_manifest, bundle_snapshot, create_server
 from corpusledger.cli import _parser
 
 
@@ -62,6 +62,18 @@ def test_service_external_sort_operation(tmp_path) -> None:
     )
     assert result["report"]["records"] == 2
     assert output.read_text(encoding="utf-8").splitlines()[0].startswith('{"id":"a"')
+
+
+def test_service_index_query_supports_cursor_pagination(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"alpha","text":"a"}\n{"id":"beta","text":"b"}\n', encoding="utf-8")
+    manifest = build_manifest(source)
+    manifest_path = tmp_path / "manifest.json"
+    manifest.save(manifest_path)
+    index_path = tmp_path / "records.index.db"
+    with ManifestIndex.build(manifest, index_path):
+        result = CorpusService().dispatch({"operation": "index_query", "index": str(index_path), "after_id": "alpha"})
+    assert [item["record_id"] for item in result["records"]] == ["beta"]
 
 
 def test_service_rejects_invalid_extended_requests(tmp_path) -> None:

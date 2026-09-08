@@ -363,6 +363,8 @@ wheel smoke tests on Linux, Windows, and macOS.
   for validated metadata streams whose complete record list exceeds memory;
 - deterministic cursor pagination is available through `ManifestIndex.query(after_id=...)`
   and `query-index --after-id` for large index consumers;
+- the loopback service exposes the same cursor-aware index reads through the
+  `index_query` operation;
 - JSON Schema export is available through the `corpusledger schema manifest`
   command, and `schema-compat` checks backward/forward/full compatibility;
 - Sigstore-compatible keyless attestations and transparency-log integration;

@@ -18,6 +18,7 @@ from .canonical import CanonicalPolicy
 from .catalog import SnapshotCatalog
 from .diff import compare
 from .external_sort import external_sort_jsonl
+from .index import ManifestIndex
 from .manifest import Manifest, build_manifest
 from .privacy import PrivacyConfig
 from .readers import iter_corpus
@@ -61,6 +62,24 @@ class CorpusService:
             before = Manifest.load(_required_path(request, "before"))
             after = Manifest.load(_required_path(request, "after"))
             return {"operation": operation, "diff": compare(before, after).to_dict()}
+        if operation == "index_query":
+            index_path = _required_path(request, "index")
+            options: dict[str, Any] = {}
+            for name in ("id_prefix", "after_id", "source", "field_path", "field_hash"):
+                value = request.get(name)
+                if value is not None and not isinstance(value, str):
+                    raise ValueError(f"{name} must be a string or omitted")
+                options[name] = value
+            limit = request.get("limit", 100)
+            if isinstance(limit, bool) or not isinstance(limit, int):
+                raise ValueError("limit must be an integer")
+            with ManifestIndex(index_path) as index:
+                rows = index.query(limit=limit, **options)
+                return {
+                    "operation": operation,
+                    "index": index.stats(),
+                    "records": [row.to_dict() for row in rows],
+                }
         if operation == "verify_bundle":
             bundle = _required_path(request, "bundle")
             expected = request.get("expected_archive_digest")
@@ -128,8 +147,8 @@ class CorpusService:
         if operation == "catalog":
             return _catalog_request(request)
         raise ValueError(
-            "operation must be one of: manifest, diff, verify_bundle, schema, schema_validate, "
-            "schema_compat, sort_jsonl, catalog"
+            "operation must be one of: manifest, diff, index_query, verify_bundle, schema, "
+            "schema_validate, schema_compat, sort_jsonl, catalog"
         )
 
 
