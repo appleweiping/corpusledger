@@ -44,6 +44,35 @@ def test_service_manifest_accepts_selective_sort_policy(tmp_path) -> None:
     assert result["manifest"]["hash_metadata"]["policy"]["sort_paths"] == ["labels"]
 
 
+def test_service_external_sort_operation(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    output = tmp_path / "sorted.jsonl"
+    source.write_text('{"id":"b"}\n{"id":"a"}\n', encoding="utf-8")
+    result = CorpusService().dispatch(
+        {"operation": "sort_jsonl", "input": str(source), "output": str(output), "chunk_size": 1}
+    )
+    assert result["report"]["records"] == 2
+    assert output.read_text(encoding="utf-8").splitlines()[0].startswith('{"id":"a"')
+
+
+def test_service_rejects_invalid_extended_requests(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"a"}\n', encoding="utf-8")
+    service = CorpusService()
+    with pytest.raises(ValueError):
+        service.dispatch([])  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        service.dispatch(
+            {"operation": "sort_jsonl", "input": str(source), "output": str(tmp_path / "x"), "chunk_size": True}
+        )
+    with pytest.raises(ValueError):
+        service.dispatch({"operation": "manifest", "input": str(source), "policy": []})
+    manifest_path = tmp_path / "manifest.json"
+    build_manifest(source).save(manifest_path)
+    with pytest.raises(ValueError):
+        service.dispatch({"operation": "schema", "manifest": str(manifest_path), "title": 1})
+
+
 def test_service_rejects_unknown_operations() -> None:
     try:
         CorpusService().dispatch({"operation": "delete_everything"})

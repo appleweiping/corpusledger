@@ -17,6 +17,7 @@ from typing import Any
 from .canonical import CanonicalPolicy
 from .catalog import SnapshotCatalog
 from .diff import compare
+from .external_sort import external_sort_jsonl
 from .manifest import Manifest, build_manifest
 from .readers import iter_corpus
 from .schema import to_json_schema, validate_json_schema
@@ -31,6 +32,14 @@ class CorpusService:
         if not isinstance(request, Mapping):
             raise ValueError("request must be an object")
         operation = request.get("operation")
+        if operation == "sort_jsonl":
+            source = _required_path(request, "input")
+            destination = _required_path(request, "output")
+            chunk_size = request.get("chunk_size", 10_000)
+            if isinstance(chunk_size, bool) or not isinstance(chunk_size, int):
+                raise ValueError("chunk_size must be an integer")
+            sort_report = external_sort_jsonl(source, destination, chunk_size=chunk_size)
+            return {"operation": operation, "report": sort_report.to_dict()}
         if operation == "manifest":
             source = _required_path(request, "input")
             policy_value = request.get("policy", {})
@@ -100,7 +109,9 @@ class CorpusService:
             }
         if operation == "catalog":
             return _catalog_request(request)
-        raise ValueError("operation must be one of: manifest, diff, verify_bundle, schema, schema_validate, catalog")
+        raise ValueError(
+            "operation must be one of: manifest, diff, verify_bundle, schema, schema_validate, sort_jsonl, catalog"
+        )
 
 
 def create_server(
