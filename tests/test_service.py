@@ -35,6 +35,15 @@ def test_service_dispatch_manifest_and_http(tmp_path) -> None:
         server.server_close()
 
 
+def test_service_manifest_accepts_selective_sort_policy(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text('{"id":"a","labels":["b","a"]}\n', encoding="utf-8")
+    result = CorpusService().dispatch(
+        {"operation": "manifest", "input": str(source), "policy": {"sort_paths": ["labels"]}}
+    )
+    assert result["manifest"]["hash_metadata"]["policy"]["sort_paths"] == ["labels"]
+
+
 def test_service_rejects_unknown_operations() -> None:
     try:
         CorpusService().dispatch({"operation": "delete_everything"})

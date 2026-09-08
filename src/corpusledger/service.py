@@ -14,6 +14,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+from .canonical import CanonicalPolicy
 from .catalog import SnapshotCatalog
 from .diff import compare
 from .manifest import Manifest, build_manifest
@@ -32,7 +33,13 @@ class CorpusService:
         operation = request.get("operation")
         if operation == "manifest":
             source = _required_path(request, "input")
-            return {"operation": operation, "manifest": build_manifest(source).to_dict()}
+            policy_value = request.get("policy", {})
+            if not isinstance(policy_value, Mapping):
+                raise ValueError("policy must be an object")
+            return {
+                "operation": operation,
+                "manifest": build_manifest(source, policy=CanonicalPolicy.from_dict(dict(policy_value))).to_dict(),
+            }
         if operation == "diff":
             before = Manifest.load(_required_path(request, "before"))
             after = Manifest.load(_required_path(request, "after"))
