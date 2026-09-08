@@ -83,6 +83,43 @@ def test_service_external_sort_operation(tmp_path) -> None:
     assert output.read_text(encoding="utf-8").splitlines()[0].startswith('{"id":"a"')
 
 
+def test_service_pipeline_runs_and_resumes_versioned_plan(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    output = tmp_path / "projected.jsonl"
+    plan = tmp_path / "plan.json"
+    source.write_text('{"id":"a","text":"hello","extra":1}\n', encoding="utf-8")
+    plan.write_text(
+        json.dumps(
+            {
+                "format": "corpusledger.pipeline-plan.v1",
+                "steps": [{"kind": "select", "fields": ["id", "text"]}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    service = CorpusService()
+    first = service.dispatch(
+        {
+            "operation": "pipeline",
+            "input": str(source),
+            "output": str(output),
+            "plan": str(plan),
+        }
+    )
+    assert first["report"]["records"] == 1
+    assert json.loads(output.read_text(encoding="utf-8")) == {"id": "a", "text": "hello"}
+    resumed = service.dispatch(
+        {
+            "operation": "pipeline",
+            "input": str(source),
+            "output": str(output),
+            "plan": str(plan),
+            "resume": True,
+        }
+    )
+    assert resumed["report"]["resumed"] is True
+
+
 def test_service_index_query_supports_cursor_pagination(tmp_path) -> None:
     source = tmp_path / "records.jsonl"
     source.write_text('{"id":"alpha","text":"a"}\n{"id":"beta","text":"b"}\n', encoding="utf-8")
@@ -111,6 +148,26 @@ def test_service_rejects_invalid_extended_requests(tmp_path) -> None:
     build_manifest(source).save(manifest_path)
     with pytest.raises(ValueError):
         service.dispatch({"operation": "schema", "manifest": str(manifest_path), "title": 1})
+    with pytest.raises(ValueError, match="resume"):
+        service.dispatch(
+            {
+                "operation": "pipeline",
+                "input": str(source),
+                "output": str(tmp_path / "out.jsonl"),
+                "plan": str(tmp_path / "plan.json"),
+                "resume": 1,
+            }
+        )
+    with pytest.raises(ValueError, match="id_field"):
+        service.dispatch(
+            {
+                "operation": "pipeline",
+                "input": str(source),
+                "output": str(tmp_path / "out.jsonl"),
+                "plan": str(tmp_path / "plan.json"),
+                "id_field": 1,
+            }
+        )
 
 
 def test_service_rejects_unknown_operations() -> None:

@@ -367,6 +367,8 @@ wheel smoke tests on Linux, Windows, and macOS.
   `index_query` operation;
 - the loopback service also exposes authenticated manifest rebuilds through
   `verify`, including named drift mismatches;
+- the loopback service exposes resumable, plan-driven record pipelines through
+  `pipeline`, returning source/output digests and checkpoint provenance;
 - JSON Schema export is available through the `corpusledger schema manifest`
   command, and `schema-compat` checks backward/forward/full compatibility;
 - Sigstore-compatible keyless attestations and transparency-log integration;

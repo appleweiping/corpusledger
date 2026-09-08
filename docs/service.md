@@ -18,7 +18,7 @@ corpusledger serve --host 127.0.0.1 --port 8080
 ```
 
 Requests use an explicit `operation` (`manifest`, `verify`, `diff`, `index_query`,
-`verify_bundle`, or `catalog`) and filesystem paths. `verify` rebuilds a
+`verify_bundle`, `catalog`, or `pipeline`) and filesystem paths. `verify` rebuilds a
 manifest using its authenticated hash, canonical, privacy, and exclusion
 metadata, returning named mismatches instead of a boolean-only failure.
 `index_query` accepts an
@@ -42,3 +42,8 @@ Every input line produces exactly one compact output line, including structured
 or processor failures. The `StreamReport` records SHA-256 digests of the exact
 input/output streams and success/failure counts, making subprocess and gateway
 replays auditable without sharing Python implementation details.
+
+The `pipeline` operation runs a versioned JSON pipeline plan atomically and
+returns the same provenance digest/checkpoint report as the CLI. It accepts
+`input`, `output`, and `plan` paths plus optional `id_field`, `state`, and
+`resume` values.

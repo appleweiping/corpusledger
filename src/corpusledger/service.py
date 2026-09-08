@@ -20,6 +20,8 @@ from .diff import compare
 from .external_sort import external_sort_jsonl
 from .index import ManifestIndex
 from .manifest import Manifest, build_manifest
+from .pipeline import run_pipeline
+from .plan import load_pipeline_plan
 from .privacy import PrivacyConfig
 from .readers import iter_corpus
 from .schema import compare_json_schemas, to_json_schema, validate_json_schema
@@ -175,9 +177,31 @@ class CorpusService:
             }
         if operation == "catalog":
             return _catalog_request(request)
+        if operation == "pipeline":
+            source = _required_path(request, "input")
+            output = _required_path(request, "output")
+            plan = _required_path(request, "plan")
+            id_field = request.get("id_field", "id")
+            if not isinstance(id_field, str) or not id_field:
+                raise ValueError("id_field must be a non-empty string")
+            state = request.get("state")
+            if state is not None and (not isinstance(state, str) or not state.strip()):
+                raise ValueError("state must be a non-empty path string or omitted")
+            resume = request.get("resume", False)
+            if not isinstance(resume, bool):
+                raise ValueError("resume must be a boolean")
+            pipeline_report = run_pipeline(
+                source,
+                output,
+                load_pipeline_plan(plan).compile(),
+                id_field=id_field,
+                state=state,
+                resume=resume,
+            )
+            return {"operation": operation, "report": pipeline_report.to_dict()}
         raise ValueError(
             "operation must be one of: manifest, diff, index_query, verify_bundle, schema, "
-            "schema_validate, schema_compat, sort_jsonl, verify, catalog"
+            "schema_validate, schema_compat, sort_jsonl, verify, catalog, pipeline"
         )
 
 

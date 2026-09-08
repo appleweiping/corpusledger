@@ -8,6 +8,7 @@ All notable changes follow the principles of Keep a Changelog.
   `ManifestIndex.query(after_id=...)` and `query-index --after-id`.
 - Expose authenticated manifest rebuild and named drift detection through the
   loopback service's `verify` operation.
+- Expose resumable versioned record pipelines through the loopback service.
 
 - Add reproducible `snapshot --exclude` path configuration. Exact exclusions
   are persisted in manifests and reused by `verify`, while legacy manifests
