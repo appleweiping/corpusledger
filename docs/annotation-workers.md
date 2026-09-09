@@ -24,6 +24,7 @@ runtime reflection over input objects.
 ```powershell
 python interop/build_workers.py --output D:/Company/worker-build-001 --dependency-cache D:/Company/.tools/corpusledger-worker-deps --fetch
 python interop/verify_workers.py --build-dir D:/Company/worker-build-001
+python interop/verify_execution.py --build-dir D:/Company/worker-build-001
 ```
 
 The output directory must not exist and must be outside the repository. Builds
@@ -40,8 +41,31 @@ ports with generated, unprinted Bearer tokens. It checks real request/response
 interoperability, source immutability, text/offset/reference fidelity, empty
 input, a 1,001-digit integer, positions beyond binary64 and uint64, malformed
 JSON/schema/identity rejection, authentication, and partial-body timeouts. It
-prints machine-readable evidence and stops its child processes. This is a
-checked-in contract fixture, not an accuracy or throughput benchmark.
+also runs the durable executor against a temporary SQLite v2 journal: after Go's
+validated output is saved, the actual Java process is terminated. The event
+remains at its original revision. Reopening the database refuses implicit replay;
+restarting Java on its pinned endpoint and explicitly acknowledging the retry
+finishes only the missing step, then atomically publishes the event revision and
+the committed operation result. The selected document and untouched sibling are
+checked by canonical bytes/digests, not Python's permissive `True == 1` equality.
+
+`verify_execution.py` adds a separate Python event-service process. It creates and
+queries a two-document event over authenticated HTTP, begins a server-registered
+pipeline, terminates and restarts the service, resumes the saved operation, and
+queries the final revision/history. After both workers stop, repeating the same
+committed key must return the saved result without another worker invocation or
+event revision. Invalid credentials, an unknown pipeline registration, and a
+changed document selection are rejected without publishing another operation or
+revision. Operation discovery and history use exclusive-cursor pagination.
+Worker descriptors and endpoints reach the service through
+bounded startup input; tokens exist only in process environments. The script's
+private `--serve` mode is a test harness, not a deployment interface; see
+[durable execution](annotation-execution.md) for the application API and limits.
+
+Both scripts print machine-readable evidence, stop their child processes, and
+remove only their own temporary test databases. These are checked-in contract
+fixtures, not an accuracy or throughput benchmark. Passing them does not establish
+compatibility with another platform's protocol or full distributed-service parity.
 
 ## Running a worker
 

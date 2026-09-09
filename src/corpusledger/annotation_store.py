@@ -27,6 +27,41 @@ STORE_FORMAT = "corpusledger.annotation-store.v1"
 MAX_EVENT_DOCUMENTS = 10_000
 MAX_EVENT_BYTES = 128 * 1024 * 1024
 _APPLICATION_ID = 0x434C4153
+_EVENT_TABLES = {"documents", "revisions"}
+_EXECUTION_TABLES = {"annotation_operations", "annotation_operation_events"}
+_EXECUTION_GUARDS = {
+    f"annotation_operation_events_no_{action.lower()}": (
+        f"CREATE TRIGGER annotation_operation_events_no_{action.lower()} "
+        f"BEFORE {action} ON annotation_operation_events "
+        "BEGIN SELECT RAISE(ABORT,'annotation operation events are append-only'); END"
+    )
+    for action in ("UPDATE", "DELETE")
+}
+# (name, declared type, NOT NULL flag, primary-key position). These fixed
+# identifiers are never constructed from event or operation input.
+_TABLE_COLUMNS = {
+    "documents": (("digest", "TEXT", 0, 1), ("body", "TEXT", 1, 0)),
+    "revisions": (
+        ("event_id", "TEXT", 1, 1),
+        ("revision", "INTEGER", 1, 2),
+        ("digest", "TEXT", 1, 0),
+        ("parent_digest", "TEXT", 0, 0),
+        ("body", "TEXT", 1, 0),
+    ),
+    "annotation_operations": (
+        ("operation_id", "TEXT", 0, 1),
+        ("version", "INTEGER", 1, 0),
+        ("digest", "TEXT", 1, 0),
+        ("body", "TEXT", 1, 0),
+    ),
+    "annotation_operation_events": (
+        ("operation_id", "TEXT", 1, 1),
+        ("version", "INTEGER", 1, 2),
+        ("digest", "TEXT", 1, 0),
+        ("parent_digest", "TEXT", 0, 0),
+        ("body", "TEXT", 1, 0),
+    ),
+}
 
 
 class AnnotationStoreError(InputError):
@@ -186,6 +221,33 @@ class AnnotationStoreVerification:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedAnnotationAppend:
+    """Immutable, pre-serialized payload; only CAS ancestry remains to be added."""
+
+    event: AnnotationEvent
+    provenance: Mapping[str, Any]
+    bodies: tuple[tuple[str, str], ...]
+    document_bytes: int
+    descriptor_prefix: str
+    provenance_json: str
+
+    def render(self, revision: int, parent_digest: str | None) -> str:
+        # This is the historical sort_keys=True descriptor order. The only
+        # unencoded values are a checked revision and a validated chain digest.
+        parent = "null" if parent_digest is None else f'"{parent_digest}"'
+        return (
+            self.descriptor_prefix
+            + ',"parent_digest":'
+            + parent
+            + ',"provenance":'
+            + self.provenance_json
+            + ',"revision":'
+            + str(revision)
+            + "}"
+        )
+
+
 class AnnotationStore:
     """SQLite event history with content-addressed documents and atomic CAS writes.
 
@@ -233,27 +295,75 @@ class AnnotationStore:
                         self._connection.execute(f"PRAGMA application_id={_APPLICATION_ID}")
                         self._connection.execute("PRAGMA user_version=1")
             with self._transaction():
-                if self._tables() != {"documents", "revisions"}:
-                    raise AnnotationStoreError("database is not a supported annotation store")
-                if (
-                    self._connection.execute("PRAGMA application_id").fetchone()[0] != _APPLICATION_ID
-                    or self._connection.execute("PRAGMA user_version").fetchone()[0] != 1
-                ):
-                    raise AnnotationStoreError("unsupported annotation store identity/version")
-                for table, columns in (
-                    ("documents", ("digest", "body")),
-                    ("revisions", ("event_id", "revision", "digest", "parent_digest", "body")),
-                ):
-                    # Identifiers are fixed literals, never derived from event input.
-                    actual = tuple(row[1] for row in self._connection.execute(f"PRAGMA table_info({table})"))
-                    if actual != columns:
-                        raise AnnotationStoreError("annotation store schema does not match its format")
+                self._validate_schema()
         except BaseException:
             self.close()
             raise
 
     def _tables(self) -> set[str]:
         return {row[0] for row in self._connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+
+    def _validate_schema(self) -> int:
+        """Inspect identity and layout in the caller's existing transaction."""
+        tables = self._tables()
+        if tables not in (_EVENT_TABLES, _EVENT_TABLES | _EXECUTION_TABLES):
+            raise AnnotationStoreError("database is not a supported annotation store")
+        version = self._connection.execute("PRAGMA user_version").fetchone()[0]
+        if self._connection.execute("PRAGMA application_id").fetchone()[0] != _APPLICATION_ID or version not in (1, 2):
+            raise AnnotationStoreError("unsupported annotation store identity/version")
+        expected = _EVENT_TABLES if version == 1 else _EVENT_TABLES | _EXECUTION_TABLES
+        if tables != expected:
+            raise AnnotationStoreError("annotation store schema does not match its format")
+        for table in sorted(expected):
+            rows = tuple(self._connection.execute(f"PRAGMA table_xinfo({table})"))
+            actual = tuple((row[1], row[2], row[3], row[5]) for row in rows)
+            if actual != _TABLE_COLUMNS[table] or any(row[4] is not None or row[6] != 0 for row in rows):
+                raise AnnotationStoreError("annotation store schema does not match its format")
+        if version == 2:
+            for name, statement in _EXECUTION_GUARDS.items():
+                row = self._connection.execute(
+                    "SELECT tbl_name,sql FROM sqlite_master WHERE type='trigger' AND name=?", (name,)
+                ).fetchone()
+                if row is None or row[0] != "annotation_operation_events" or row[1] != statement:
+                    raise AnnotationStoreError(
+                        "annotation execution journal append-only guards do not match its schema"
+                    )
+        return int(version)
+
+    @property
+    def execution_enabled(self) -> bool:
+        """Whether this store was explicitly upgraded to schema v2; never migrate.
+
+        Recheck the database so upgrades by independent connections are visible.
+        An execution coordinator can also inspect this inside its transaction.
+        """
+        self._ensure_open()
+        if self._connection.in_transaction:
+            return self._validate_schema() == 2
+        with self._transaction():
+            return self._validate_schema() == 2
+
+    def enable_execution_journal(self) -> None:
+        """Atomically opt in to schema v2, preserving all event history bytes.
+
+        Idempotent across independent connections. Older v1-only readers reject
+        the explicit new schema version; ordinary opening never upgrades a file.
+        """
+        with self._transaction(write=True):
+            if self._validate_schema() == 2:
+                return
+            self._connection.execute(
+                "CREATE TABLE annotation_operations(operation_id TEXT PRIMARY KEY, "
+                "version INTEGER NOT NULL, digest TEXT NOT NULL, body TEXT NOT NULL)"
+            )
+            self._connection.execute(
+                "CREATE TABLE annotation_operation_events(operation_id TEXT NOT NULL, version INTEGER NOT NULL, "
+                "digest TEXT NOT NULL, parent_digest TEXT, body TEXT NOT NULL, PRIMARY KEY(operation_id,version))"
+            )
+            for statement in _EXECUTION_GUARDS.values():
+                self._connection.execute(statement)
+            self._connection.execute("PRAGMA user_version=2")
+            self._validate_schema()
 
     def __enter__(self) -> AnnotationStore:
         self._ensure_open()
@@ -392,9 +502,19 @@ class AnnotationStore:
         if not isinstance(event, AnnotationEvent):
             raise AnnotationStoreError("event must be an AnnotationEvent")
         _revision(expected_revision, zero=True)
+        prepared = self._prepare_append(event, provenance)
+        with self._transaction(write=True):
+            return self._append_in_transaction(prepared, expected_revision=expected_revision)
+
+    def _prepare_append(
+        self, event: AnnotationEvent, provenance: Mapping[str, Any] | None = None
+    ) -> _PreparedAnnotationAppend:
+        """Validate and serialize user payloads before the caller takes a lock."""
+        if not isinstance(event, AnnotationEvent):
+            raise AnnotationStoreError("event must be an AnnotationEvent")
         if provenance is not None and not isinstance(provenance, Mapping):
             raise AnnotationStoreError("provenance must be an object")
-        evidence = _thaw(_freeze(provenance if provenance is not None else {}))
+        evidence = _freeze(provenance if provenance is not None else {})
         bodies = []
         document_bytes = 0
         for document in event.documents:
@@ -404,52 +524,74 @@ class AnnotationStore:
             if document_bytes > MAX_EVENT_BYTES:
                 raise AnnotationStoreError("event documents exceed byte limit")
             bodies.append((hashlib.sha256(encoded).hexdigest(), body))
-        with self._transaction(write=True):
-            previous = None
-            for info, _ in self._chain(event.event_id):
-                previous = info
-            actual = previous.revision if previous else 0
-            if actual != expected_revision:
-                raise AnnotationConflictError(event.event_id, expected_revision, actual)
-            parent = previous.digest if previous else None
-            payload = {
+        prefix = _json(
+            {
                 "format": STORE_FORMAT,
                 "event_id": event.event_id,
-                "revision": actual + 1,
-                "parent_digest": parent,
                 "metadata": _thaw(event.metadata),
-                "provenance": evidence,
                 "documents": [
                     {"id": document.document_id, "digest": digest}
                     for document, (digest, _) in zip(event.documents, bodies, strict=True)
                 ],
             }
-            rendered = _json(payload)
-            if len(rendered.encode("utf-8")) + document_bytes > MAX_EVENT_BYTES:
-                raise AnnotationStoreError("complete event exceeds byte limit")
-            digest = _digest(payload)
-            for document_digest, body in bodies:
-                existing = self._connection.execute(
-                    "SELECT body FROM documents WHERE digest=?", (document_digest,)
-                ).fetchone()
-                if existing is not None and existing[0] != body:
-                    raise AnnotationStoreError("existing document content conflicts with its digest")
-                self._connection.execute(
-                    "INSERT OR IGNORE INTO documents(digest,body) VALUES(?,?)", (document_digest, body)
-                )
+        )[:-1]
+        prepared = _PreparedAnnotationAppend(
+            event, evidence, tuple(bodies), document_bytes, prefix, _json(_thaw(evidence))
+        )
+        if len(prepared.render(1, None).encode("utf-8")) + document_bytes > MAX_EVENT_BYTES:
+            raise AnnotationStoreError("complete event exceeds byte limit")
+        return prepared
+
+    def _append_in_transaction(
+        self, prepared: _PreparedAnnotationAppend, *, expected_revision: int
+    ) -> AnnotationRevision:
+        """Append without committing, allowing an operation CAS in the same tx.
+
+        Internal callers own the transaction and must let errors roll it back.
+        No processor callbacks or user-payload serialization happen here.
+        """
+        self._ensure_open()
+        if not self._connection.in_transaction:
+            raise AnnotationStoreError("annotation append requires an active transaction")
+        if not isinstance(prepared, _PreparedAnnotationAppend):
+            raise AnnotationStoreError("annotation append requires a prepared payload")
+        _revision(expected_revision, zero=True)
+        event = prepared.event
+        previous = None
+        for info, _ in self._chain(event.event_id):
+            previous = info
+        actual = previous.revision if previous else 0
+        if actual != expected_revision:
+            raise AnnotationConflictError(event.event_id, expected_revision, actual)
+        _revision(actual + 1)
+        parent = previous.digest if previous else None
+        rendered = prepared.render(actual + 1, parent)
+        encoded = rendered.encode("utf-8")
+        if len(encoded) + prepared.document_bytes > MAX_EVENT_BYTES:
+            raise AnnotationStoreError("complete event exceeds byte limit")
+        digest = hashlib.sha256(encoded).hexdigest()
+        for document_digest, body in prepared.bodies:
+            existing = self._connection.execute(
+                "SELECT body FROM documents WHERE digest=?", (document_digest,)
+            ).fetchone()
+            if existing is not None and existing[0] != body:
+                raise AnnotationStoreError("existing document content conflicts with its digest")
             self._connection.execute(
-                "INSERT INTO revisions(event_id,revision,digest,parent_digest,body) VALUES(?,?,?,?,?)",
-                (event.event_id, actual + 1, digest, parent, rendered),
+                "INSERT OR IGNORE INTO documents(digest,body) VALUES(?,?)", (document_digest, body)
             )
-            return AnnotationRevision(
-                event.event_id,
-                actual + 1,
-                digest,
-                parent,
-                tuple(document.document_id for document in event.documents),
-                event,
-                _freeze(evidence),
-            )
+        self._connection.execute(
+            "INSERT INTO revisions(event_id,revision,digest,parent_digest,body) VALUES(?,?,?,?,?)",
+            (event.event_id, actual + 1, digest, parent, rendered),
+        )
+        return AnnotationRevision(
+            event.event_id,
+            actual + 1,
+            digest,
+            parent,
+            tuple(document.document_id for document in event.documents),
+            event,
+            prepared.provenance,
+        )
 
     def list(self, *, after_event_id: str | None = None, limit: int = 100) -> tuple[AnnotationRevisionInfo, ...]:
         """List latest descriptors in binary event-ID order with an exclusive cursor."""

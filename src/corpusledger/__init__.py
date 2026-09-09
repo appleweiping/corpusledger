@@ -1,5 +1,11 @@
 """CorpusLedger: reproducible manifests and diffs for JSON NLP corpora."""
 
+from ._annotation_journal import (
+    AnnotationExecutionConflict,
+    AnnotationExecutionError,
+    AnnotationExecutionUncertain,
+)
+from .annotation_execution import AnnotationExecutor, AnnotationOperation, RemoteAnnotationPipeline
 from .annotation_pipeline import (
     AnnotationPipeline,
     AnnotationPipelineError,
@@ -7,6 +13,8 @@ from .annotation_pipeline import (
     AnnotationProcessor,
     AnnotationStepReport,
 )
+from .annotation_protocol import AnnotationProtocolError, AnnotationRequest, AnnotationResponse, ProcessorDescription
+from .annotation_remote import RemoteAnnotationError, RemoteAnnotationProcessor
 from .annotation_store import (
     EVENT_FORMAT,
     STORE_FORMAT,
@@ -78,12 +86,20 @@ __all__ = [
     "AnnotationConflictError",
     "AnnotationDocument",
     "AnnotationEvent",
+    "AnnotationExecutionConflict",
+    "AnnotationExecutionError",
+    "AnnotationExecutionUncertain",
+    "AnnotationExecutor",
     "AnnotationField",
     "AnnotationIndex",
+    "AnnotationOperation",
     "AnnotationPipeline",
     "AnnotationPipelineError",
     "AnnotationPipelineResult",
     "AnnotationProcessor",
+    "AnnotationProtocolError",
+    "AnnotationRequest",
+    "AnnotationResponse",
     "AnnotationRevision",
     "AnnotationRevisionInfo",
     "AnnotationStepReport",
@@ -111,9 +127,13 @@ __all__ = [
     "PlanStep",
     "PrivacyConfig",
     "PrivacyReport",
+    "ProcessorDescription",
     "ReaderAdapter",
     "Record",
     "RecordEntry",
+    "RemoteAnnotationError",
+    "RemoteAnnotationPipeline",
+    "RemoteAnnotationProcessor",
     "SchemaCompatibilityIssue",
     "SchemaCompatibilityReport",
     "SchemaValidationIssue",

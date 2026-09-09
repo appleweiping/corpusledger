@@ -25,6 +25,14 @@ span queries, reference validation and dependency-checked processor pipelines.
 Those documents preserve exact text/offsets rather than applying manifest
 normalization. See [typed annotations](docs/annotations.md) and
 [processor pipelines](docs/annotation-pipelines.md).
+The development branch also includes [durable remote execution](docs/annotation-execution.md),
+with explicit SQLite migration, pinned worker identities, recovery-aware
+reservations and atomic multi-document publication. See the
+[Go/Java workers](docs/annotation-workers.md) and
+[authenticated local event service](docs/annotation-service.md).
+The [real-text service benchmark](docs/annotation-service-benchmark.md) records
+independent correctness checks and explicitly separates them from NLP accuracy
+or production-scale claims.
 
 ## Why content manifests?
 

@@ -59,6 +59,7 @@ include = [
   "/benchmarks",
   "/docs",
   "/examples",
+  "/interop",
   "/scripts",
   "/src",
   "/tests",

@@ -4,6 +4,17 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add strict, versioned remote annotation request/response contracts, pinned
+  loopback HTTP adapters and independently compiled Go/Java worker examples.
+- Add explicit annotation-store v2 migration and a same-database, hash-chained
+  execution journal with durable reservations, saved step results, explicit
+  uncertain retry and atomic final event/operation publication. Preserve v1 event
+  history bytes; never claim remote external effects are exactly-once.
+- Add an authenticated local event service and typed client with a fixed worker
+  registry, bounded requests, operation discovery/history and restart recovery;
+  verify real Go/Java processes and a checksum-pinned real-text corpus separately
+  from the unit fixtures. Add actual three-platform worker integration CI.
+
 - Reject tableless SQLite files with existing application/version markers or
   schema objects before annotation-store initialization, preserving their bytes.
 

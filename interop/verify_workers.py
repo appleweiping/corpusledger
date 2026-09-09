@@ -17,6 +17,7 @@ import secrets
 import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 from contextlib import ExitStack, contextmanager
@@ -24,6 +25,11 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit
 
+from corpusledger.annotation_execution import (
+    AnnotationExecutionUncertain,
+    AnnotationExecutor,
+    RemoteAnnotationPipeline,
+)
 from corpusledger.annotation_pipeline import AnnotationPipeline
 from corpusledger.annotation_protocol import (
     AnnotationRequest,
@@ -33,12 +39,14 @@ from corpusledger.annotation_protocol import (
     encode_wire,
 )
 from corpusledger.annotation_remote import RemoteAnnotationProcessor
+from corpusledger.annotation_store import AnnotationEvent, AnnotationStore
 from corpusledger.annotations import AnnotationDocument, AnnotationField, AnnotationType, SpanAnnotation
 
 
 class Worker:
-    def __init__(self, argv):
-        self.token = secrets.token_urlsafe(32)
+    def __init__(self, argv, *, token=None):
+        self.argv = argv
+        self.token = token or secrets.token_urlsafe(32)
         self.process = subprocess.Popen(
             argv,
             stdin=subprocess.DEVNULL,
@@ -76,6 +84,11 @@ class Worker:
                 self.process.wait(timeout=5)
         self.process.stdout.close()
         self.process.stderr.close()
+
+    def restart(self):
+        port, token, argv = self.address.port, self.token, self.argv
+        self.close()
+        self.__init__([*argv, "--port", str(port)], token=token)
 
     def request(self, method, path, body=None, *, authorized=True, extra_headers=None):
         raw = encode_wire(body) if body is not None and not isinstance(body, bytes) else body
@@ -170,6 +183,98 @@ def check_startup_rejection(command):
         assert completed.stderr.strip() == b"worker_start_or_run_failed"
 
 
+def check_execution(go, java_worker, remote_go, remote_java, document, expected):
+    """Persist a real first step, lose the second worker, then reopen and recover."""
+    sibling = AnnotationDocument("untouched.sibling", "exact sibling\r\n🙂")
+    event = AnnotationEvent("durable.event", (document, sibling), {"flag": True, "number": 1})
+    plan = {document.document_id: RemoteAnnotationPipeline("demo.chain", "1", (remote_java, remote_go))}
+    real_execute = RemoteAnnotationProcessor.execute
+    successful_calls = []
+    stop_after_first = True
+
+    def observed_execute(worker, request):
+        nonlocal stop_after_first
+        response = real_execute(worker, request)
+        successful_calls.append(worker.description.name)
+        if stop_after_first and worker.description.name == "demo.go.tokens":
+            stop_after_first = False
+            java_worker.close()  # Actual subsequent HTTP failure, not a fake OCR/NLP response.
+        return response
+
+    with tempfile.TemporaryDirectory(prefix="corpusledger-execution-check-") as directory:
+        database = Path(directory) / "events.sqlite"
+        with patch.object(RemoteAnnotationProcessor, "execute", observed_execute):
+            with AnnotationStore(database) as store:
+                source = store.put(event)
+                store.enable_execution_journal()
+                executor = AnnotationExecutor(store)
+                begun = executor.begin(
+                    "durable.op", event.event_id, plan, expected_revision=source.revision, expected_digest=source.digest
+                )
+                assert begun.status == "ready" and begun.completed_steps == 0
+                try:
+                    executor.resume("durable.op", plan)
+                except AnnotationExecutionUncertain:
+                    pass
+                else:
+                    raise AssertionError("stopped second worker was not reported uncertain")
+                pending = executor.get("durable.op")
+                assert pending.status == "uncertain" and pending.completed_steps == 1
+                assert store.get(event.event_id).digest == source.digest
+                assert store.get(event.event_id).event.digest == event.digest
+            java_worker.restart()
+            assert java_worker.description == remote_java.description
+            with AnnotationStore(database, create=False) as store:
+                executor = AnnotationExecutor(store)
+                assert store.execution_enabled
+                try:
+                    executor.resume("durable.op", plan)
+                except AnnotationExecutionUncertain:
+                    pass
+                else:
+                    raise AssertionError("uncertain work replayed without acknowledgement")
+                assert successful_calls == ["demo.go.tokens"]
+                committed = executor.resume("durable.op", plan, retry_uncertain=True)
+                assert committed.status == "committed" and committed.completed_steps == 2
+                revision = store.get(event.event_id)
+                assert revision.revision == 2 and revision.parent_digest == source.digest
+                assert committed.to_dict()["result"] == {"revision": 2, "digest": revision.digest}
+                assert revision.event.get_document(document.document_id).digest == expected.digest
+                assert revision.event.get_document(sibling.document_id).digest == sibling.digest
+                assert encode_wire(revision.event.get_document(sibling.document_id).to_dict()) == encode_wire(
+                    sibling.to_dict()
+                )
+                assert store.get(event.event_id, 1).event.digest == event.digest
+                assert [item.revision for item in store.history(event.event_id)] == [1, 2]
+                assert successful_calls == ["demo.go.tokens", "demo.java.group"]
+                before = committed.to_dict()
+                with patch.object(
+                    RemoteAnnotationProcessor, "verify", side_effect=AssertionError("unexpected reverify")
+                ):
+                    assert (
+                        executor.begin(
+                            "durable.op",
+                            event.event_id,
+                            plan,
+                            expected_revision=source.revision,
+                            expected_digest=source.digest,
+                        ).to_dict()
+                        == before
+                    )
+                    assert executor.resume("durable.op", plan).to_dict() == before
+                assert len(store.history(event.event_id)) == 2
+                serialized = json.dumps(before, sort_keys=True)
+                assert go.token not in serialized and java_worker.token not in serialized
+                return {
+                    "status": committed.status,
+                    "revision": revision.revision,
+                    "attempts": before["attempts"],
+                    "successful_worker_calls": successful_calls,
+                    "source_event_digest": event.digest,
+                    "final_event_digest": revision.event.digest,
+                }
+
+
 def verify(build_dir: Path) -> dict[str, object]:
     artifacts = json.loads((build_dir / "build.json").read_text(encoding="utf-8"))
     for name in ("go_worker", "java_worker", "jackson_core"):
@@ -211,8 +316,10 @@ def verify(build_dir: Path) -> dict[str, object]:
                 [remote_java.as_processor("integrated", "java"), remote_go.as_processor("integrated", "go")]
             )
             integrated = pipeline.run(document)
-            assert integrated.document == grouped
+            assert integrated.document.digest == grouped.digest
+            assert encode_wire(integrated.document.to_dict()) == encode_wire(grouped.to_dict())
             assert [step.name for step in integrated.steps] == ["demo.go.tokens", "demo.java.group"]
+            execution = check_execution(go, java_worker, remote_go, remote_java, document, grouped)
         annotations = [a for a in grouped.annotations if a.type_name == "token"]
         assert [(a.start, a.end) for a in annotations] == [(0, 2), (3, 5), (8, 9), (10, 11)]
         assert [a.features["text"] for a in annotations] == ["A😀", "e\u0301", "終", "Z"]
@@ -253,9 +360,12 @@ def verify(build_dir: Path) -> dict[str, object]:
             "chain": [go.description.to_dict(), java_worker.description.to_dict()],
             "source_digest": document.digest,
             "result_digest": grouped.digest,
+            "durable_execution": execution,
             "checks": [
                 "Python-Go-Java",
                 "RemoteAnnotationProcessor-dependency-pipeline",
+                "SQLite-v2-real-worker-loss-and-explicit-recovery",
+                "atomic-event-commit-and-operation-idempotence",
                 "Unicode-codepoints",
                 "empty-anchor",
                 "1001-digit-integer",

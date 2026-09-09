@@ -57,6 +57,24 @@ universal performance guarantee.
 
 ## Compatibility
 
+### Annotation execution is a separate exact-text boundary
+
+Annotation documents/events do not use the manifest canonicalization policy:
+their original text, codepoint offsets, closed schemas and typed feature values
+are preserved. `annotation_protocol` defines bounded language-neutral JSON;
+`annotation_remote` connects only to explicitly configured loopback workers;
+`annotation_execution` plans and runs the DAG; `_annotation_journal` participates
+in the same SQLite transaction as `annotation_store` when publishing results.
+Worker calls are outside database writer transactions. The new event service
+does not extend the generic path-accepting manifest `/v1/dispatch` interface.
+
+Read [durable execution](annotation-execution.md) for migration, per-step CAS,
+uncertainty and scope boundaries. The Go/Java code under `interop/` is runnable
+processor examples, not a mature cross-language SDK or model suite. Raw protocol,
+socket, journal and migration tests complement the existing document/event tests.
+
+### Manifest compatibility
+
 Manifests can be compared only when hash algorithm, canonicalization version/policy, and privacy scanner
 version/configuration are identical. This prevents configuration changes from masquerading as corpus drift. The
 top-level format string controls structural compatibility. An optional top-level `reader_metadata` extension is valid
