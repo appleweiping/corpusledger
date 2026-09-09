@@ -22,7 +22,7 @@ from .index import ManifestIndex
 from .manifest import Manifest, build_manifest
 from .pipeline import run_pipeline
 from .plan import load_pipeline_plan
-from .privacy import PrivacyConfig
+from .privacy import PrivacyConfig, scan_corpus
 from .readers import iter_corpus
 from .schema import compare_json_schemas, to_json_schema, validate_json_schema
 from .store import verify_bundle
@@ -60,6 +60,23 @@ class CorpusService:
                     privacy=PrivacyConfig.from_pack(privacy_pack),
                 ).to_dict(),
             }
+        if operation == "privacy":
+            source = _required_path(request, "input")
+            pack = request.get("pack", "default")
+            if not isinstance(pack, str):
+                raise ValueError("pack must be a string")
+            min_token_length = request.get("min_token_length", 24)
+            if isinstance(min_token_length, bool) or not isinstance(min_token_length, int):
+                raise ValueError("min_token_length must be an integer")
+            entropy_threshold = request.get("entropy_threshold", 3.7)
+            if isinstance(entropy_threshold, bool) or not isinstance(entropy_threshold, (int, float)):
+                raise ValueError("entropy_threshold must be numeric")
+            config = PrivacyConfig.from_pack(
+                pack,
+                min_token_length=min_token_length,
+                entropy_threshold=entropy_threshold,
+            )
+            return scan_corpus(source, id_field=request.get("id_field", "id"), config=config).to_dict()
         if operation == "verify":
             manifest_path = _required_path(request, "manifest")
             existing = Manifest.load(manifest_path)
@@ -200,8 +217,8 @@ class CorpusService:
             )
             return {"operation": operation, "report": pipeline_report.to_dict()}
         raise ValueError(
-            "operation must be one of: manifest, diff, index_query, verify_bundle, schema, "
-            "schema_validate, schema_compat, sort_jsonl, verify, catalog, pipeline"
+            "operation must be one of: manifest, privacy, diff, index_query, verify_bundle, "
+            "schema, schema_validate, schema_compat, sort_jsonl, verify, catalog, pipeline"
         )
 
 

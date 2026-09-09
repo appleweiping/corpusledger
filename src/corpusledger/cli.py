@@ -25,8 +25,8 @@ from .index import ManifestIndex
 from .manifest import Manifest, build_manifest
 from .pipeline import drop_fields, rename_field, run_pipeline, select_fields
 from .plan import load_pipeline_plan
-from .privacy import PrivacyConfig, privacy_packs
-from .readers import ReaderAdapter, iter_corpus, load_reader_adapter
+from .privacy import PrivacyConfig, privacy_packs, scan_corpus
+from .readers import ReaderAdapter, discover_inputs, iter_corpus, load_reader_adapter
 from .reporting import render
 from .schema import compare_json_schemas, to_json_schema, validate_json_schema
 from .service import create_server
@@ -84,6 +84,13 @@ def _parser() -> argparse.ArgumentParser:
     schema_validate.add_argument("--id-field", default="id")
     schema_validate.add_argument("--max-errors", type=int, default=100)
     schema_validate.add_argument("--output")
+    privacy = subparsers.add_parser("privacy", help="scan a JSON/JSONL corpus for redacted privacy-risk findings")
+    privacy.add_argument("input")
+    privacy.add_argument("--id-field", default="id")
+    privacy.add_argument("--pack", choices=privacy_packs(), default="default")
+    privacy.add_argument("--min-token-length", type=int, default=24)
+    privacy.add_argument("--entropy-threshold", type=float, default=3.7)
+    privacy.add_argument("--output")
     schema_compat = subparsers.add_parser(
         "schema-compat", help="check backward/forward compatibility of two JSON Schemas"
     )
@@ -346,6 +353,31 @@ def run(argv: list[str] | None = None) -> int:
         rendered = json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
         _write_report(rendered, args.output)
         return 0 if not issues else 2
+    if args.command == "privacy":
+        input_path = Path(args.input).resolve()
+        if args.output:
+            destination = Path(args.output).resolve()
+            if input_path.is_dir() and destination.is_relative_to(input_path):
+                raise InputError("privacy output must be outside the input corpus directory")
+            _require_distinct(
+                destination,
+                *discover_inputs(input_path),
+                message="privacy output must not overwrite any input corpus file",
+            )
+        try:
+            config = PrivacyConfig.from_pack(
+                args.pack,
+                min_token_length=args.min_token_length,
+                entropy_threshold=args.entropy_threshold,
+            )
+            privacy_report = scan_corpus(input_path, id_field=args.id_field, config=config)
+        except (TypeError, ValueError) as exc:
+            raise InputError(str(exc)) from exc
+        _write_report(
+            json.dumps(privacy_report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n",
+            args.output,
+        )
+        return 0
     if args.command == "schema-compat":
         before_path = Path(args.before).resolve()
         after_path = Path(args.after).resolve()

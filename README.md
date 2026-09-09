@@ -151,6 +151,12 @@ Built-in packs are `default`, `credentials`, and `pii`; the selected scanner
 configuration is authenticated in manifest metadata. The Python API exposes the
 same choices through `PrivacyConfig.from_pack()` and `privacy_packs()`.
 
+For a standalone report, run `corpusledger privacy records.jsonl --pack pii
+--output privacy.json`. The report records the complete checked population,
+scanner configuration, and redacted locations. It is also available through
+`scan_corpus()` and the service's `privacy` operation. See
+[privacy scanning](docs/privacy-scanning.md) for semantics and resource bounds.
+
 Authenticate a manifest with a detached Ed25519 signature. The verifier receives the trusted public key out of band;
 the signature envelope intentionally contains only its SHA-256 fingerprint, never key material:
 

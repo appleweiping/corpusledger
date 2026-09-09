@@ -47,6 +47,81 @@ def test_snapshot_supports_privacy_pack(tmp_path: Path) -> None:
     assert "email" in payload["privacy_metadata"]["config"]["sensitive_names"]
 
 
+def test_privacy_command_emits_redacted_findings(tmp_path: Path) -> None:
+    source = tmp_path / "corpus.jsonl"
+    source.write_text(
+        '{"id":"a","email":"a@example.test","token":"abcdefghijklmnopqrstuvwxyz012345"}\n',
+        encoding="utf-8",
+    )
+    output = tmp_path / "privacy.json"
+    assert (
+        run(
+            [
+                "privacy",
+                str(source),
+                "--pack",
+                "pii",
+                "--min-token-length",
+                "10",
+                "--output",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    payload = json.loads(output.read_text(encoding="utf-8"))
+    assert payload["finding_count"] == 3
+    assert payload["records_checked"] == 1
+    assert all("abcdefghijklmnopqrstuvwxyz" not in json.dumps(item) for item in payload["findings"])
+
+
+def test_privacy_cli_protects_corpus_and_existing_report(tmp_path: Path) -> None:
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    source = corpus / "records.jsonl"
+    source.write_text('{"id":"a","email":"a@example.test"}\n', encoding="utf-8")
+    original = source.read_bytes()
+    with pytest.raises(InputError, match="overwrite"):
+        run(["privacy", str(source), "--output", str(source)])
+    with pytest.raises(InputError, match="outside"):
+        run(["privacy", str(corpus), "--output", str(corpus / "report.json")])
+    alias = tmp_path / "alias.json"
+    alias.hardlink_to(source)
+    with pytest.raises(InputError, match="overwrite"):
+        run(["privacy", str(corpus), "--output", str(alias)])
+    assert source.read_bytes() == original
+    assert not (corpus / "report.json").exists()
+    output = tmp_path / "report.json"
+    output.write_text("previous report", encoding="utf-8")
+    source.write_text('{"id":"a"}\ninvalid\n', encoding="utf-8")
+    with pytest.raises(InputError, match="malformed"):
+        run(["privacy", str(source), "--output", str(output)])
+    assert output.read_text(encoding="utf-8") == "previous report"
+
+
+def test_privacy_cli_options_and_service_use_same_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from corpusledger import CorpusService
+    from corpusledger.cli import main
+
+    source = tmp_path / "records.json"
+    source.write_text('[{"key":"a","token":"short"},{"key":"b","text":"ordinary"}]', encoding="utf-8")
+    args = ["privacy", str(source), "--id-field", "key", "--pack", "credentials"]
+    assert run(args) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["records_checked"] == 2
+    assert payload["finding_count"] == 1
+    assert payload == CorpusService().dispatch(
+        {"operation": "privacy", "input": str(source), "id_field": "key", "pack": "credentials"}
+    )
+    monkeypatch.setattr("sys.argv", ["corpusledger", *args, "--entropy-threshold", "nan"])
+    with pytest.raises(SystemExit) as exc:
+        main()
+    assert exc.value.code == 2
+    assert "finite" in capsys.readouterr().err
+
+
 def test_stream_cli_emits_one_response_per_request_and_writes_report(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

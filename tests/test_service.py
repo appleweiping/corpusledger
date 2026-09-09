@@ -53,6 +53,23 @@ def test_service_manifest_accepts_privacy_pack(tmp_path) -> None:
         CorpusService().dispatch({"operation": "manifest", "input": str(source), "privacy_pack": "bad"})
 
 
+def test_service_scans_privacy_findings_without_returning_values(tmp_path) -> None:
+    source = tmp_path / "records.jsonl"
+    source.write_text(
+        '{"id":"a","email":"a@example.test","token":"abcdefghijklmnopqrstuvwxyz012345"}\n',
+        encoding="utf-8",
+    )
+    result = CorpusService().dispatch(
+        {"operation": "privacy", "input": str(source), "pack": "pii", "min_token_length": 10}
+    )
+    assert result["config"]["min_token_length"] == 10
+    assert {finding["kind"] for finding in result["findings"]} == {
+        "sensitive_field_name",
+        "high_entropy_token",
+    }
+    assert all("abcdefghijklmnopqrstuvwxyz" not in json.dumps(finding) for finding in result["findings"])
+
+
 def test_service_verifies_and_reports_manifest_drift(tmp_path) -> None:
     source = tmp_path / "records.jsonl"
     source.write_text('{"id":"a","text":"hello"}\n', encoding="utf-8")
@@ -144,6 +161,12 @@ def test_service_rejects_invalid_extended_requests(tmp_path) -> None:
         )
     with pytest.raises(ValueError):
         service.dispatch({"operation": "manifest", "input": str(source), "policy": []})
+    with pytest.raises(ValueError, match="pack"):
+        service.dispatch({"operation": "privacy", "input": str(source), "pack": 1})
+    with pytest.raises(ValueError, match="min_token_length"):
+        service.dispatch({"operation": "privacy", "input": str(source), "min_token_length": True})
+    with pytest.raises(ValueError, match="entropy_threshold"):
+        service.dispatch({"operation": "privacy", "input": str(source), "entropy_threshold": "high"})
     manifest_path = tmp_path / "manifest.json"
     build_manifest(source).save(manifest_path)
     with pytest.raises(ValueError):

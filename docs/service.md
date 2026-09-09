@@ -17,8 +17,14 @@ The equivalent command-line entry point is:
 corpusledger serve --host 127.0.0.1 --port 8080
 ```
 
-Requests use an explicit `operation` (`manifest`, `verify`, `diff`, `index_query`,
-`verify_bundle`, `catalog`, or `pipeline`) and filesystem paths. `verify` rebuilds a
+Requests use an explicit `operation` (`manifest`, `privacy`, `verify`, `diff`, `index_query`,
+`verify_bundle`, `catalog`, or `pipeline`) and filesystem paths. `privacy` scans a
+JSON/JSONL corpus with a named privacy pack and returns the validated scanner
+configuration plus redacted field-name and high-entropy-token findings. It accepts
+`id_field`, `pack`, `min_token_length`, and `entropy_threshold` and returns the
+same versioned report as the [privacy CLI and API](privacy-scanning.md), including
+`records_checked` and `finding_count`. IDs and field paths identify locations;
+matched field values are omitted. `verify` rebuilds a
 manifest using its authenticated hash, canonical, privacy, and exclusion
 metadata, returning named mismatches instead of a boolean-only failure.
 `index_query` accepts an

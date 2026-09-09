@@ -12,9 +12,11 @@ import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from .paths import join_pointer
+from .readers import iter_corpus
 
 DEFAULT_SENSITIVE_NAMES = frozenset({"password", "passwd", "secret", "api_key", "token", "access_token", "ssn"})
 PRIVACY_PACKS = {
@@ -174,3 +176,54 @@ def scan_record(
     """Scan one record, allowing callers to discard its content immediately."""
 
     return tuple(scan_records(((record_id, data),), config))
+
+
+@dataclass(frozen=True)
+class PrivacyReport:
+    """Scanner configuration, complete record count, and redacted findings."""
+
+    input_path: str
+    id_field: str
+    config: PrivacyConfig
+    records_checked: int
+    findings: tuple[dict[str, Any], ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the shared CLI and service report contract."""
+        return {
+            "schema_version": 1,
+            "privacy_version": PRIVACY_VERSION,
+            "operation": "privacy",
+            "input": self.input_path,
+            "id_field": self.id_field,
+            "config": self.config.to_dict(),
+            "records_checked": self.records_checked,
+            "finding_count": len(self.findings),
+            "findings": [dict(finding) for finding in self.findings],
+        }
+
+
+def scan_corpus(path: str | Path, *, id_field: str = "id", config: PrivacyConfig | None = None) -> PrivacyReport:
+    """Scan a selected corpus using strict readers and stable report ordering.
+
+    JSONL bodies are read one record at a time. Duplicate-ID bookkeeping and all
+    findings remain in memory; JSON arrays are materialized by the JSON reader.
+    IDs and field paths are retained as locations, so callers must themselves
+    use non-sensitive identifiers and keys when sharing reports.
+    """
+    if not isinstance(id_field, str) or not id_field.strip():
+        raise ValueError("id_field must be a non-empty string")
+    if config is not None and not isinstance(config, PrivacyConfig):
+        raise TypeError("config must be a PrivacyConfig")
+    active = config if config is not None else PrivacyConfig()
+    source = Path(path).resolve()
+    count = 0
+
+    def records() -> Iterable[tuple[str, dict[str, Any]]]:
+        nonlocal count
+        for record in iter_corpus(source, id_field=id_field):
+            count += 1
+            yield record.record_id, record.data
+
+    findings = scan_records(records(), active)
+    return PrivacyReport(source.as_posix(), id_field, active, count, tuple(findings))
