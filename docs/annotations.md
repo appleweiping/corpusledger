@@ -131,8 +131,9 @@ excess token. These are ceilings, not fixed memory-use promises: complete text,
 annotations and serialized data remain in memory. Keep interpreter JSON integer
 limits stable while constructing and serializing a snapshot.
 
-This delivers a Python local document and span-processing workflow. It does not
-yet implement multi-document event storage, remote processor orchestration,
-cross-language RPC/protocol implementations, distributed deployment, trained NLP
-models or gold-standard annotation accuracy. Those remain separate requirements
+This delivers a Python local document and span-processing workflow. The
+[annotation store](annotation-store.md) adds versioned multi-document event
+storage and atomic publication of processed document snapshots. Remote processor
+orchestration, cross-language RPC/protocol implementations, distributed deployment,
+trained NLP models and gold-standard annotation accuracy remain separate requirements
 in the whole-repository alignment audit.

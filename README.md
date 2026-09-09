@@ -322,6 +322,18 @@ The [annotation benchmark](docs/annotation-benchmark.md) checks 1,000 real Corne
 dialogue records and a separate 100,000-span synthetic index against exhaustive
 interval predicates; rule-generated spans are not gold annotation-quality labels.
 
+`AnnotationStore` adds durable, related multi-document events: immutable history,
+content-addressed document storage, explicit optimistic revisions, and atomic
+publication of per-document annotation pipeline results with provenance.
+Use `annotations-store put/get/list/history/verify`; see
+[versioned annotation events](docs/annotation-store.md) and the executable
+[store demo](examples/annotation_store_demo.py). Concurrent updates require the
+expected revision, and failing callbacks never publish a partial event snapshot.
+Callback effects outside the database cannot be rolled back.
+The [persistent event benchmark](docs/annotation-store-benchmark.md) verifies
+200 real-text events, 300 historical revisions, content deduplication, and
+failure atomicity against independently checked source and history inventories.
+
 ## What a manifest contains
 
 - format and normalization version;

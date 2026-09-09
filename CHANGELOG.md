@@ -4,6 +4,10 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add durable multi-document annotation events with content-addressed storage,
+  optimistic revision checks, verified history, and atomic pipeline publication
+  including per-document provenance. Add `annotations-store` CLI workflows,
+  SQLite-sidecar/input-alias protection, concurrency and corruption regressions.
 - Add immutable typed span documents, closed feature/reference validation,
   code-point/UTF-16 conversion and indexed interval queries. Add local annotation
   processor DAGs with preflight schema checks, bounded output collection and
