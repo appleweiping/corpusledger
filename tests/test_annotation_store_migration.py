@@ -159,7 +159,9 @@ def test_every_migration_ddl_failure_rolls_back_to_v1(tmp_path: Path, stage: str
             with pytest.raises(AnnotationStoreError, match="transaction failed"):
                 store.enable_execution_journal()
         finally:
-            store._connection.set_authorizer(None)
+            # Python 3.10 cannot disable an authorizer with None. Replace the
+            # injected fault with an allow-all hook before verifying rollback.
+            store._connection.set_authorizer(lambda *_args: sqlite3.SQLITE_OK)
         assert not store._connection.in_transaction
         assert not store.execution_enabled
         assert history_bytes(store._connection) == before
