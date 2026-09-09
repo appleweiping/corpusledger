@@ -57,8 +57,12 @@ lists set-like.
 
 ## Install
 
+These development docs and examples target `feat/whole-repository-alignment`.
+Its newer annotation and processing APIs are not yet a released or merged-main
+feature set. Install the same development branch to reproduce the examples:
+
 ```bash
-python -m pip install "git+https://github.com/appleweiping/corpusledger.git"
+python -m pip install "git+https://github.com/appleweiping/corpusledger.git@feat/whole-repository-alignment"
 ```
 
 For an editable source checkout:
