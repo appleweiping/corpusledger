@@ -218,6 +218,12 @@ class AnnotationStore:
                     # Recheck after acquiring the writer lock: another connection
                     # may have initialized this empty store in the meantime.
                     if not self._tables():
+                        if (
+                            self._connection.execute("PRAGMA application_id").fetchone()[0] != 0
+                            or self._connection.execute("PRAGMA user_version").fetchone()[0] != 0
+                            or self._connection.execute("SELECT 1 FROM sqlite_master LIMIT 1").fetchone() is not None
+                        ):
+                            raise AnnotationStoreError("database is not a supported annotation store")
                         self._connection.execute("CREATE TABLE documents(digest TEXT PRIMARY KEY, body TEXT NOT NULL)")
                         self._connection.execute(
                             "CREATE TABLE revisions(event_id TEXT NOT NULL, revision INTEGER NOT NULL, "

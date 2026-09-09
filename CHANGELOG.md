@@ -4,6 +4,9 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Reject tableless SQLite files with existing application/version markers or
+  schema objects before annotation-store initialization, preserving their bytes.
+
 - Add durable multi-document annotation events with content-addressed storage,
   optimistic revision checks, verified history, and atomic pipeline publication
   including per-document provenance. Add `annotations-store` CLI workflows,

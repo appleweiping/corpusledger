@@ -254,6 +254,24 @@ def test_unknown_databases_not_modified(tmp_path: Path) -> None:
         AnnotationStore(tmp_path / "version.db")
 
 
+@pytest.mark.parametrize(
+    "statement",
+    ["PRAGMA application_id=91", "PRAGMA user_version=44", "CREATE VIEW reserved AS SELECT 1"],
+)
+def test_initialization_refuses_owned_tableless_databases(tmp_path: Path, statement: str) -> None:
+    path = tmp_path / "reserved.db"
+    database = sqlite3.connect(path)
+    try:
+        database.execute(statement)
+        database.commit()
+    finally:
+        database.close()
+    before = path.read_bytes()
+    with pytest.raises(AnnotationStoreError, match="not a supported"), AnnotationStore(path):
+        pass
+    assert path.read_bytes() == before
+
+
 def test_corrupted_document_rejected_on_get_verify_and_reuse(tmp_path: Path) -> None:
     path = tmp_path / "db"
     with AnnotationStore(path) as store:

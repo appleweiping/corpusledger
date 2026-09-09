@@ -39,7 +39,7 @@
   "format": "corpusledger.annotation-store-benchmark.v1",
   "kind": "persistent-event-engineering-checks-on-external-real-text",
   "memory_scope": "traced Python allocations during creation, processing, failure oracles and reopening/verification; excludes source records and pipeline/schema objects loaded before tracing; also excludes SQLite native caches and process RSS",
-  "peak_python_bytes": 581036,
+  "peak_python_bytes": 581451,
   "platform": "Windows-11-10.0.26200-SP0",
   "python": "3.12.13 (main, Jun 11 2026, 04:05:29) [MSC v.1944 64 bit (AMD64)]",
   "related_view": "Python str.casefold-derived text; not translation or gold annotation",
@@ -48,7 +48,7 @@
     "__main__.py": "b11e8b8ad256b526d7cc6e958f3f327c3c64729b8188439ddfb7becff9af2deb",
     "annotation_cli.py": "0d5f790c2c86a1f3f5a0c7b9147b71ddd3e8f66100ef7c2072b7d577e922ebcd",
     "annotation_pipeline.py": "7f40a589a0b53707f347e46ae70a3a830c60463f238b44f61d4f28dcfd3f8fda",
-    "annotation_store.py": "98c1219f52ffce6462e0b23986ba55c2a5ed904c7f5a5fc83c9db8ed4776257f",
+    "annotation_store.py": "22882aafd55c3c1a80959d78d94650343c6e164573201e49f79d25a4cbbc512c",
     "annotation_store_cli.py": "bf8ea8838167c6a424fb1653cc152488381e5bb4d54eb8a49cca131eead076c3",
     "annotations.py": "9ee5f74715e17a2196716be036d93ba4aa1c8922df00706258d3a13f5c85f00f",
     "canonical.py": "c05111a246b7c636b2b029d58733fc0613040da777367228a2d9f0d789ef1b37",
@@ -92,11 +92,11 @@
   "sqlite_database_bytes_after_close": 532480,
   "sqlite_version": "3.53.1",
   "stages": {
-    "create_events_seconds": 3.617572700000892,
-    "failure_oracles_seconds": 0.017789500001526903,
-    "process_and_commit_seconds": 2.721588700005668,
-    "reopen_and_verify_seconds": 2.880399000001489,
-    "source_hashing_and_loading_seconds": 0.23920530000032159
+    "create_events_seconds": 3.3091700000004494,
+    "failure_oracles_seconds": 0.026681000003009103,
+    "process_and_commit_seconds": 2.395547500003886,
+    "reopen_and_verify_seconds": 2.607017199996335,
+    "source_hashing_and_loading_seconds": 0.24125730000378098
   },
   "temporary_database_removed": true,
   "timing_scope": "separate local stages; reopen verification includes independent correctness oracles"
