@@ -11,20 +11,32 @@ planning and per-step provenance over these snapshots.
 
 ```python
 from corpusledger import (
-    AnnotationDocument, AnnotationField, AnnotationType, SpanAnnotation,
-    codepoint_to_utf16, utf16_to_codepoint,
+    AnnotationDocument,
+    AnnotationField,
+    AnnotationType,
+    SpanAnnotation,
+    codepoint_to_utf16,
+    utf16_to_codepoint,
 )
 
 token = AnnotationType("token", {"surface": AnnotationField()})
-entity = AnnotationType("entity", {
-    "kind": AnnotationField(),
-    "tokens": AnnotationField("references", target_type="token"),
-})
-document = AnnotationDocument("demo", "Hi 🌍", (token, entity), (
-    SpanAnnotation("t1", "token", 0, 2, {"surface": "Hi"}),
-    SpanAnnotation("t2", "token", 3, 4, {"surface": "🌍"}),
-    SpanAnnotation("e1", "entity", 3, 4, {"kind": "symbol", "tokens": ["t2"]}),
-))
+entity = AnnotationType(
+    "entity",
+    {
+        "kind": AnnotationField(),
+        "tokens": AnnotationField("references", target_type="token"),
+    },
+)
+document = AnnotationDocument(
+    "demo",
+    "Hi 🌍",
+    (token, entity),
+    (
+        SpanAnnotation("t1", "token", 0, 2, {"surface": "Hi"}),
+        SpanAnnotation("t2", "token", 3, 4, {"surface": "🌍"}),
+        SpanAnnotation("e1", "entity", 3, 4, {"kind": "symbol", "tokens": ["t2"]}),
+    ),
+)
 assert document.span_text("t2") == "🌍"
 assert document.index("token").query(3, 4, relation="exact")[0].annotation_id == "t2"
 assert codepoint_to_utf16(document.text, 4) == 5

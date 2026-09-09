@@ -15,7 +15,10 @@ or distributed scheduling.
 import re
 
 from corpusledger.annotations import (
-    AnnotationDocument, AnnotationField, AnnotationType, SpanAnnotation,
+    AnnotationDocument,
+    AnnotationField,
+    AnnotationType,
+    SpanAnnotation,
 )
 from corpusledger.annotation_pipeline import AnnotationPipeline, AnnotationProcessor
 
@@ -25,31 +28,42 @@ sentence_type = AnnotationType(
     {"tokens": AnnotationField("references", target_type="Token")},
 )
 
+
 def tokens(document):
     for index, match in enumerate(re.finditer(r"\w+", document.text)):
         yield SpanAnnotation(
-            f"token-{index}", "Token", match.start(), match.end(),
+            f"token-{index}",
+            "Token",
+            match.start(),
+            match.end(),
             {"surface": match.group()},
         )
 
+
 def whole_document_sentence(document):
-    token_ids = [
-        annotation.annotation_id
-        for annotation in document.annotations
-        if annotation.type_name == "Token"
-    ]
+    token_ids = [annotation.annotation_id for annotation in document.annotations if annotation.type_name == "Token"]
     yield SpanAnnotation(
-        "sentence-0", "Sentence", 0, len(document.text), {"tokens": token_ids},
+        "sentence-0",
+        "Sentence",
+        0,
+        len(document.text),
+        {"tokens": token_ids},
     )
 
-pipeline = AnnotationPipeline([
-    # Declaration order does not override dependencies.
-    AnnotationProcessor(
-        "sentence", "1", whole_document_sentence,
-        requires=(token_type,), produces=(sentence_type,),
-    ),
-    AnnotationProcessor("tokens", "1", tokens, produces=(token_type,)),
-])
+
+pipeline = AnnotationPipeline(
+    [
+        # Declaration order does not override dependencies.
+        AnnotationProcessor(
+            "sentence",
+            "1",
+            whole_document_sentence,
+            requires=(token_type,),
+            produces=(sentence_type,),
+        ),
+        AnnotationProcessor("tokens", "1", tokens, produces=(token_type,)),
+    ]
+)
 source = AnnotationDocument("example", "Café 🌍 speaks.")
 assert pipeline.plan(source) == ("tokens", "sentence")
 result = pipeline.run(source)
