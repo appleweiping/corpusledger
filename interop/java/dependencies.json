@@ -1,0 +1,13 @@
+{
+  "format": "corpusledger.worker-dependencies.v1",
+  "reviewed": "2026-09-09",
+  "artifacts": [
+    {
+      "file": "jackson-core-2.21.6.jar",
+      "url": "https://repo.maven.apache.org/maven2/com/fasterxml/jackson/core/jackson-core/2.21.6/jackson-core-2.21.6.jar",
+      "sha256": "36111c3a4372cd5c2be6f4ec44a050382487920f3fc38ca3015c9c1678bd7c56",
+      "license": "Apache-2.0",
+      "release_notes": "https://github.com/FasterXML/jackson/wiki/Jackson-Release-2.21.6"
+    }
+  ]
+}
