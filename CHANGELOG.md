@@ -4,6 +4,11 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add immutable typed span documents, closed feature/reference validation,
+  code-point/UTF-16 conversion and indexed interval queries. Add local annotation
+  processor DAGs with preflight schema checks, bounded output collection and
+  versioned digest provenance; expose document creation, validation, tokenization
+  and queries through `annotations` CLI commands.
 - Add deterministic exclusive ID cursors to manifest-index queries through
   `ManifestIndex.query(after_id=...)` and `query-index --after-id`.
 - Expose authenticated manifest rebuild and named drift detection through the

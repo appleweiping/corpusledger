@@ -20,6 +20,12 @@ release reviews, experiment inputs, annotation handoffs, and CI checks. Default 
 at a time, and optional Ed25519 signatures authenticate exact manifest bytes. It reports evidence; it does not decide
 whether a change is acceptable.
 
+For local annotation processing, it also provides immutable typed text documents,
+span queries, reference validation and dependency-checked processor pipelines.
+Those documents preserve exact text/offsets rather than applying manifest
+normalization. See [typed annotations](docs/annotations.md) and
+[processor pipelines](docs/annotation-pipelines.md).
+
 ## Why content manifests?
 
 File hashes are useful but too coarse for many corpus workflows. Reformatting JSON or reordering object keys should not
@@ -294,6 +300,28 @@ review without revealing the original values.
 The `catalog` CLI exposes named snapshot registration, lineage, listing, and
 version diffs for reproducible release workflows.
 
+## Typed annotation workflow
+
+```bash
+corpusledger annotations create text.txt document.json --id example
+corpusledger annotations tokenize document.json tokenized.json
+corpusledger annotations validate tokenized.json
+corpusledger annotations query tokenized.json 0 5 --type token
+python examples/annotation_demo.py
+```
+
+The Python API supports closed feature types, intra-document references,
+Unicode code-point/UTF-16 conversion and exact/inside/covering/overlapping queries.
+`AnnotationPipeline` preflights exact input/output schemas and runs versioned
+processors in deterministic dependency order, recording content digests after
+each step. The CLI tokenizer is a simple Unicode word/punctuation rule, not a
+trained model. [The guide](docs/annotations.md) specifies offset semantics,
+resource limits and input-preserving output handling. This local workflow does
+not yet implement remote annotation processing or cross-language services.
+The [annotation benchmark](docs/annotation-benchmark.md) checks 1,000 real Cornell
+dialogue records and a separate 100,000-span synthetic index against exhaustive
+interval predicates; rule-generated spans are not gold annotation-quality labels.
+
 ## What a manifest contains
 
 - format and normalization version;
@@ -314,9 +342,11 @@ design trade-offs.
 
 ## Privacy and threat model
 
-CorpusLedger runs locally and opens only input JSON/JSONL files selected by the user. The privacy scanner examines
+CorpusLedger runs locally on files explicitly selected by the user. Corpus readers
+accept JSON/JSONL by default; annotation creation also accepts UTF-8 text. The privacy scanner examines
 values already read as corpus records. It does not inspect environment variables, keychains, home directories, Git
-history, network endpoints, or unrelated files.
+history, network endpoints, or unrelated files. Annotation document and query
+outputs contain raw text/features and are not redacted privacy reports.
 
 Sensitive field-name matching and high-entropy token detection are heuristics. A finding contains record ID, field path,
 length/entropy where relevant, and a short SHA-256 evidence hash—never the full suspected secret. False positives and
@@ -337,10 +367,10 @@ bytes differ when the same corpus is snapshotted at another location. Use `verif
 
 ## Non-goals
 
-- parsing CSV, Parquet, archives, or remote object stores;
-- validating against a user-authored JSON Schema;
+- built-in corpus readers for CSV, Parquet, or remote object stores (explicit reader adapters are available);
+- implementing the full JSON Schema specification (the documented validation subset is supported);
 - detecting all personal data or credentials;
-- anonymizing, redacting, repairing, or transforming the corpus;
+- automatically anonymizing or repairing a corpus based on heuristic findings;
 - trusted timestamps, transparency logs, or public-key distribution;
 - estimating model or annotation quality;
 - claiming two reordered lists are equivalent by default.

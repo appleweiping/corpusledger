@@ -1,5 +1,22 @@
 """CorpusLedger: reproducible manifests and diffs for JSON NLP corpora."""
 
+from .annotation_pipeline import (
+    AnnotationPipeline,
+    AnnotationPipelineError,
+    AnnotationPipelineResult,
+    AnnotationProcessor,
+    AnnotationStepReport,
+)
+from .annotations import (
+    ANNOTATION_FORMAT,
+    AnnotationDocument,
+    AnnotationField,
+    AnnotationIndex,
+    AnnotationType,
+    SpanAnnotation,
+    codepoint_to_utf16,
+    utf16_to_codepoint,
+)
 from .canonical import CANONICAL_VERSION, CanonicalPolicy, canonical_bytes, canonical_json, canonicalize
 from .catalog import SnapshotCatalog, SnapshotRef
 from .diff import CorpusDiff, compare
@@ -38,12 +55,22 @@ from .store import (
 from .stream import NdjsonGateway, StreamReport
 
 __all__ = [
+    "ANNOTATION_FORMAT",
     "CANONICAL_VERSION",
     "INDEX_FORMAT",
     "MANIFEST_FORMAT",
     "PLAN_FORMAT",
     "READER_ENTRY_POINT_GROUP",
     "SIGNATURE_FORMAT",
+    "AnnotationDocument",
+    "AnnotationField",
+    "AnnotationIndex",
+    "AnnotationPipeline",
+    "AnnotationPipelineError",
+    "AnnotationPipelineResult",
+    "AnnotationProcessor",
+    "AnnotationStepReport",
+    "AnnotationType",
     "BundleReport",
     "BundleVerification",
     "CanonicalPolicy",
@@ -73,12 +100,14 @@ __all__ = [
     "SignatureEnvelope",
     "SnapshotCatalog",
     "SnapshotRef",
+    "SpanAnnotation",
     "StreamReport",
     "build_manifest",
     "bundle_snapshot",
     "canonical_bytes",
     "canonical_json",
     "canonicalize",
+    "codepoint_to_utf16",
     "compare",
     "compare_json_schemas",
     "create_server",
@@ -95,6 +124,7 @@ __all__ = [
     "select_fields",
     "sign_manifest",
     "to_json_schema",
+    "utf16_to_codepoint",
     "validate_json_schema",
     "verify_bundle",
     "verify_manifest_signature",

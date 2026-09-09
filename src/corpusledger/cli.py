@@ -10,6 +10,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from .annotation_cli import configure_annotation_parser, run_annotation_command
 from .canonical import CanonicalPolicy
 from .catalog import SnapshotCatalog, SnapshotRef
 from .diff import compare
@@ -42,6 +43,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version="%(prog)s 0.2.0")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    configure_annotation_parser(subparsers.add_parser("annotations", help="typed document/span annotation workflows"))
     snapshot = subparsers.add_parser("snapshot", help="create a corpus manifest")
     snapshot.add_argument("input")
     snapshot.add_argument("output")
@@ -271,6 +273,8 @@ def _catalog_command(args: argparse.Namespace) -> int:
 def run(argv: list[str] | None = None) -> int:
     """Execute the CLI and return a process status."""
     args = _parser().parse_args(argv)
+    if args.command == "annotations":
+        return run_annotation_command(args)
     if args.command == "catalog":
         return _catalog_command(args)
     if args.command == "snapshot":
