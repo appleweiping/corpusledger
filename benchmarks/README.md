@@ -46,5 +46,33 @@ format/memory audit, not as a hardware capacity claim; rerun it on the intended 
 
 `benchmark_fixture.py` additionally exercises the checked-in human-authored
 JSONL example through manifest creation, deterministic bundling, and archive
-verification. It records the input digest and environment; this is fixture-real
-evidence and is intentionally separate from generated 100,000-record scale data.
+verification. It records the input digest and environment as `checked-in-example`.
+This small authored fixture is distinct from both external datasets and generated
+100,000-record scale data; older `fixture-real` labels should not be interpreted
+as external real-data validation.
+
+## Cornell Movie-Dialogs privacy scan
+
+`benchmark_cornell_privacy.py` accepts the original archive from the
+[official Cornell corpus page](https://www.cs.cornell.edu/~cristian/Cornell_Movie-Dialogs_Corpus.html).
+It verifies a pinned archive SHA-256, converts all 304,713 utterances to temporary
+UTF-8 JSONL, and compares the privacy scanner's record count with the independently
+counted archive conversion. Its report records source/converted-data digests,
+scanner configuration, runtime source digests, environment, elapsed scan time and
+peak Python allocations. Conversion and digesting are outside the timed region.
+Timing includes `tracemalloc` overhead and concurrent workstation activity; memory
+does not include operating-system RSS. Use `--limit N` for an explicitly reported,
+deterministic prefix instead of the full dataset.
+
+```bash
+python benchmarks/benchmark_cornell_privacy.py /data/cornell_movie_dialogs_corpus.zip \
+  --output benchmarks/results/cornell-privacy.json
+```
+
+This is real-input parsing/scanning engineering evidence, not a labelled privacy
+detection accuracy study. The source is *Chameleons in Imagined Conversations*
+(Cristian Danescu-Niculescu-Mizil and Lillian Lee, CMCL/ACL 2011). The archive README
+provides citation and provenance but no explicit license grant; obtain the original
+archive from its publisher. The repository contains code and aggregate results only,
+not redistributed dialogue. The local conversion uses Latin-1 decoding and retains
+utterance ID, speaker ID, movie ID and text, omitting the character-name column.
