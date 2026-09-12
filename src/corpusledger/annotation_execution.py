@@ -250,7 +250,13 @@ class AnnotationExecutor:
             if response.apply(request).document.digest != output.digest:
                 raise AnnotationExecutionError("saved step does not preserve its immutable input document")
             documents[step["document_id"]] = output
-        event = AnnotationEvent(source.event_id, tuple(documents.values()), source.event.metadata)
+        event = AnnotationEvent(
+            source.event_id,
+            tuple(documents.values()),
+            source.event.metadata,
+            source.event.attachments,
+            source.event.version,
+        )
         provenance = {
             "annotation_execution": {
                 "operation_id": state["operation_id"],

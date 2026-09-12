@@ -10,6 +10,7 @@ from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any
 
+from .annotation_attachment_cli import configure_annotation_attachment_parser, run_annotation_attachment_command
 from .annotation_cli import configure_annotation_parser, run_annotation_command
 from .annotation_store_cli import configure_annotation_store_parser, run_annotation_store_command
 from .canonical import CanonicalPolicy
@@ -47,6 +48,9 @@ def _parser() -> argparse.ArgumentParser:
     configure_annotation_parser(subparsers.add_parser("annotations", help="typed document/span annotation workflows"))
     configure_annotation_store_parser(
         subparsers.add_parser("annotations-store", help="persistent annotation event history")
+    )
+    configure_annotation_attachment_parser(
+        subparsers.add_parser("annotations-attachments", help="immutable versioned binary attachments")
     )
     snapshot = subparsers.add_parser("snapshot", help="create a corpus manifest")
     snapshot.add_argument("input")
@@ -281,6 +285,8 @@ def run(argv: list[str] | None = None) -> int:
         return run_annotation_command(args)
     if args.command == "annotations-store":
         return run_annotation_store_command(args)
+    if args.command == "annotations-attachments":
+        return run_annotation_attachment_command(args)
     if args.command == "catalog":
         return _catalog_command(args)
     if args.command == "snapshot":

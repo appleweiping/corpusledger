@@ -14,12 +14,25 @@ from dataclasses import dataclass
 from typing import Any
 
 from ._annotation_journal import validate_transition
+from .annotation_attachment_snapshot import AnnotationAttachmentSnapshot
+from .annotation_attachments import attachment_request
 from .annotation_execution import AnnotationOperation
 from .annotation_protocol import MAX_WIRE_BYTES, decode_wire, encode_wire, identifier, sha256_text
 from .annotation_remote import _response_length, _token, loopback_endpoint
-from .annotation_service import COMMAND_FORMAT, ERROR_STATUS, RESPONSE_FORMAT, _credential_name, _timeout
+from .annotation_service import (
+    ATTACHMENT_DATA_FORMAT,
+    ATTACHMENT_LIST_FORMAT,
+    COMMAND_FORMAT,
+    ERROR_STATUS,
+    RESPONSE_FORMAT,
+    _credential_name,
+    _decode_attachment_data,
+    _encode_attachment_data,
+    _timeout,
+)
 from .annotation_store import (
     STORE_FORMAT,
+    STORE_FORMAT_V2,
     AnnotationEvent,
     AnnotationRevision,
     AnnotationRevisionInfo,
@@ -27,6 +40,7 @@ from .annotation_store import (
     _revision,
 )
 from .annotations import _freeze, _name, _object, _thaw
+from .attachment_types import AttachmentManifest, command_id, integer, json_digest, logical_name, manifests, sha256
 from .errors import InputError
 
 
@@ -73,7 +87,7 @@ def _snapshot(value: Any) -> AnnotationRevision:
         raise InputError("revision provenance must be an object")
     provenance = _freeze(data["provenance"])
     descriptor = {
-        "format": STORE_FORMAT,
+        "format": STORE_FORMAT if event.version == 1 else STORE_FORMAT_V2,
         "event_id": event.event_id,
         "metadata": _thaw(event.metadata),
         "documents": [{"id": doc.document_id, "digest": doc.digest} for doc in event.documents],
@@ -81,6 +95,8 @@ def _snapshot(value: Any) -> AnnotationRevision:
         "provenance": _thaw(provenance),
         "revision": info.revision,
     }
+    if event.version == 2:
+        descriptor["attachments"] = [item.to_dict() for item in event.attachments]
     if hashlib.sha256(encode_wire(descriptor)).hexdigest() != info.digest:
         raise InputError("revision descriptor digest mismatch")
     return AnnotationRevision(
@@ -186,7 +202,7 @@ class AnnotationClient:
 
     def _request(self, command: str, arguments: dict[str, Any]) -> Any:
         try:
-            self._validate_arguments(arguments)
+            self._validate_arguments(arguments, command=command)
             return self._exchange(command, arguments)
         except AnnotationClientError:
             raise
@@ -194,7 +210,7 @@ class AnnotationClient:
             raise AnnotationClientError("request_or_response_invalid") from None
 
     @staticmethod
-    def _validate_arguments(arguments: dict[str, Any]) -> None:
+    def _validate_arguments(arguments: dict[str, Any], *, command: str = "") -> None:
         for key in ("event_id", "after_event_id"):
             if key in arguments and (key == "event_id" or arguments[key] is not None):
                 _name(arguments[key], "event ID")
@@ -203,10 +219,18 @@ class AnnotationClient:
                 identifier(arguments[key], "operation ID")
         for key in ("revision", "expected_revision", "after_revision", "after_version"):
             if key in arguments and (key != "revision" or arguments[key] is not None):
-                _revision(arguments[key], zero=key.startswith("after_"))
+                _revision(
+                    arguments[key],
+                    zero=key.startswith("after_")
+                    or (command == "attachment_snapshot_import" and key == "expected_revision"),
+                )
         if "limit" in arguments:
             _limit(arguments["limit"])
-        if "expected_digest" in arguments:
+        if "expected_digest" in arguments and not (
+            command == "attachment_snapshot_import"
+            and arguments["expected_revision"] == 0
+            and arguments["expected_digest"] is None
+        ):
             sha256_text(arguments["expected_digest"], "source revision digest")
         if "retry_uncertain" in arguments and type(arguments["retry_uncertain"]) is not bool:
             raise InputError("retry_uncertain must be a boolean")
@@ -217,6 +241,213 @@ class AnnotationClient:
             for document_id, pipeline_id in selection.items():
                 _name(document_id, "document ID")
                 identifier(pipeline_id, "pipeline ID")
+
+    def attach(
+        self,
+        event_id: str,
+        name: str,
+        data: bytes,
+        media_type: str,
+        *,
+        expected_revision: int,
+        expected_digest: str,
+        command_id: str,
+    ) -> AnnotationRevision:
+        try:
+            encoded = _encode_attachment_data(data)
+            item = AttachmentManifest(name, hashlib.sha256(data).hexdigest(), len(data), media_type)
+            request = attachment_request(
+                "attach", event_id, expected_revision=expected_revision, expected_digest=expected_digest, manifest=item
+            )
+        except (InputError, ValueError, TypeError):
+            raise AnnotationClientError("request_invalid") from None
+        result = self._attachment_mutation(
+            "attachment_attach",
+            {
+                "event_id": event_id,
+                "name": name,
+                "data": encoded,
+                "media_type": media_type,
+                "expected_revision": expected_revision,
+                "expected_digest": expected_digest,
+                "command_id": command_id,
+            },
+            request,
+        )
+        if item not in result.event.attachments or result.event.version != 2:
+            raise AnnotationClientError("response_invalid")
+        return result
+
+    def detach(
+        self,
+        event_id: str,
+        name: str,
+        *,
+        expected_revision: int,
+        expected_digest: str,
+        command_id: str,
+    ) -> AnnotationRevision:
+        try:
+            request = attachment_request(
+                "detach", event_id, expected_revision=expected_revision, expected_digest=expected_digest, name=name
+            )
+        except (InputError, ValueError, TypeError):
+            raise AnnotationClientError("request_invalid") from None
+        result = self._attachment_mutation(
+            "attachment_detach",
+            {
+                "event_id": event_id,
+                "name": name,
+                "expected_revision": expected_revision,
+                "expected_digest": expected_digest,
+                "command_id": command_id,
+            },
+            request,
+        )
+        if any(item.name == name for item in result.event.attachments) or result.event.version != 2:
+            raise AnnotationClientError("response_invalid")
+        return result
+
+    def _attachment_mutation(
+        self, command: str, arguments: dict[str, Any], request: dict[str, Any]
+    ) -> AnnotationRevision:
+        try:
+            command_id(arguments["command_id"])
+        except (InputError, ValueError, TypeError):
+            raise AnnotationClientError("request_invalid") from None
+        result = self._revision_result(command, arguments)
+        provenance = {
+            "annotation_attachment": {
+                "command_id": arguments["command_id"],
+                "request_digest": json_digest(request),
+                "request": request,
+            }
+        }
+        try:
+            if (
+                result.event_id != request["event_id"]
+                or result.revision != request["expected_revision"] + 1
+                or result.parent_digest != request["expected_digest"]
+                or json_digest(result.provenance) != json_digest(provenance)
+            ):
+                raise InputError("attachment result command binding mismatch")
+        except (InputError, ValueError, TypeError):
+            raise AnnotationClientError("response_invalid") from None
+        return result
+
+    def _attachment_read(
+        self, command: str, event_id: str, revision: int, expected_digest: str, *, name: str | None = None
+    ) -> Any:
+        try:
+            integer(revision, "pinned revision", 1, 2**63 - 2)
+            sha256(expected_digest)
+            if command == "attachment_get":
+                logical_name(name)
+        except (InputError, ValueError, TypeError):
+            raise AnnotationClientError("request_invalid") from None
+        arguments = {"event_id": event_id, "revision": revision, "expected_digest": expected_digest}
+        if command == "attachment_get":
+            arguments["name"] = name
+        return self._request(command, arguments)
+
+    @staticmethod
+    def _attachment_pin(
+        value: Any, fields: set[str], expected_format: str, event_id: str, revision: int, digest: str
+    ) -> dict[str, Any]:
+        data = _object(value, {"format", "event_id", "revision", "digest"} | fields, "attachment response")
+        if (
+            data["format"] != expected_format
+            or data["event_id"] != event_id
+            or type(data["revision"]) is not int
+            or data["revision"] != revision
+            or data["digest"] != digest
+        ):
+            raise InputError("attachment response pin mismatch")
+        return dict(data)
+
+    def read_attachment(self, event_id: str, name: str, *, revision: int, expected_digest: str) -> bytes:
+        value = self._attachment_read("attachment_get", event_id, revision, expected_digest, name=name)
+        try:
+            result = self._attachment_pin(
+                value, {"attachment", "data"}, ATTACHMENT_DATA_FORMAT, event_id, revision, expected_digest
+            )
+            item = AttachmentManifest.from_dict(result["attachment"])
+            data = _decode_attachment_data(result["data"], maximum=item.size)
+            if item.name != name or len(data) != item.size or hashlib.sha256(data).hexdigest() != item.sha256:
+                raise InputError("attachment manifest does not match requested data")
+            return data
+        except (InputError, ValueError, TypeError, KeyError):
+            raise AnnotationClientError("response_invalid") from None
+
+    def list_attachments(self, event_id: str, *, revision: int, expected_digest: str) -> tuple[AttachmentManifest, ...]:
+        value = self._attachment_read("attachment_list", event_id, revision, expected_digest)
+        try:
+            result = self._attachment_pin(
+                value, {"attachments"}, ATTACHMENT_LIST_FORMAT, event_id, revision, expected_digest
+            )
+            raw = result["attachments"]
+            if not isinstance(raw, list) or len(raw) > 64:
+                raise InputError("invalid attachment inventory")
+            items = manifests(tuple(AttachmentManifest.from_dict(item) for item in raw))
+            if [item.to_dict() for item in items] != raw:
+                raise InputError("attachment inventory must be canonical")
+            return items
+        except (InputError, ValueError, TypeError, KeyError):
+            raise AnnotationClientError("response_invalid") from None
+
+    def export_attachment_snapshot(
+        self, event_id: str, *, revision: int, expected_digest: str
+    ) -> AnnotationAttachmentSnapshot:
+        value = self._attachment_read("attachment_snapshot_export", event_id, revision, expected_digest)
+        try:
+            snapshot = AnnotationAttachmentSnapshot.from_dict(value)
+            if snapshot.source != {"event_id": event_id, "revision": revision, "digest": expected_digest}:
+                raise InputError("snapshot source pin mismatch")
+            return snapshot
+        except (InputError, ValueError, TypeError, KeyError):
+            raise AnnotationClientError("response_invalid") from None
+
+    def import_attachment_snapshot(
+        self,
+        snapshot: AnnotationAttachmentSnapshot,
+        *,
+        command_id: str,
+        expected_snapshot_digest: str,
+        expected_revision: int = 0,
+        expected_digest: str | None = None,
+    ) -> AnnotationRevision:
+        try:
+            if not isinstance(snapshot, AnnotationAttachmentSnapshot):
+                raise InputError("snapshot must be a typed attachment snapshot")
+            sha256(expected_snapshot_digest)
+            if snapshot.digest != expected_snapshot_digest:
+                raise InputError("snapshot does not match external pin")
+            request = attachment_request(
+                "import",
+                snapshot.event.event_id,
+                expected_revision=expected_revision,
+                expected_digest=expected_digest,
+                snapshot_digest=snapshot.digest,
+                event_digest=snapshot.event.digest,
+                source=snapshot.source,
+            )
+            serialized = snapshot.to_dict()
+        except (InputError, ValueError, TypeError):
+            raise AnnotationClientError("request_invalid") from None
+        result = self._attachment_mutation(
+            "attachment_snapshot_import",
+            {
+                "snapshot": serialized,
+                "command_id": command_id,
+                "expected_snapshot_digest": expected_snapshot_digest,
+                "expected_revision": expected_revision,
+                "expected_digest": expected_digest,
+            },
+            request,
+        )
+        if result.event.digest != snapshot.event.digest:
+            raise AnnotationClientError("response_invalid")
+        return result
 
     def create(self, event: AnnotationEvent) -> AnnotationRevision:
         if not isinstance(event, AnnotationEvent):

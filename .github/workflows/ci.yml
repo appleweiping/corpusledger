@@ -71,7 +71,7 @@ jobs:
         run: pytest
 
   worker-interop:
-    name: Go/Java event integration (${{ matrix.os }})
+    name: Go/Java event and attachment integration (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -99,7 +99,7 @@ jobs:
           java-version: "21"
       - name: Install Python coordinator
         run: python -m pip install -e .
-      - name: Build and verify actual independent processes
+      - name: Build and verify actual workers, event execution and binary attachments
         run: python scripts/worker_ci.py
       - name: Retain source-bound contract evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -4,6 +4,12 @@ All notable changes follow the principles of Keep a Changelog.
 
 ## [Unreleased]
 
+- Add explicit annotation-store v3 migration, immutable event attachment manifests,
+  content-addressed binary storage and atomic CAS/idempotency receipts. Preserve
+  v1/v2 history bytes and attachments during document processing; detach keeps
+  historical content. Add bounded snapshot import/export, local attachment CLI,
+  authenticated local RPC/client operations and original polyglot examples.
+
 - Add strict, versioned remote annotation request/response contracts, pinned
   loopback HTTP adapters and independently compiled Go/Java worker examples.
 - Add explicit annotation-store v2 migration and a same-database, hash-chained

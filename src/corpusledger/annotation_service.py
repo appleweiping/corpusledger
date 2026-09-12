@@ -7,6 +7,8 @@ Socket deadlines do not cancel an already accepted durable execution.
 from __future__ import annotations
 
 import argparse
+import base64
+import binascii
 import hmac
 import ipaddress
 import re
@@ -26,6 +28,13 @@ from ._annotation_journal import (
     AnnotationExecutionConflict,
     AnnotationExecutionUncertain,
 )
+from .annotation_attachment_snapshot import (
+    AnnotationAttachmentSnapshot,
+    export_snapshot,
+    import_snapshot,
+    preview_import_snapshot,
+)
+from .annotation_attachments import AnnotationAttachments, AttachmentConflictError
 from .annotation_execution import AnnotationExecutor, RemoteAnnotationPipeline
 from .annotation_pipeline import AnnotationPipelineError
 from .annotation_protocol import MAX_WIRE_BYTES, ProcessorDescription, decode_wire, encode_wire, identifier
@@ -38,6 +47,7 @@ from .annotation_store import (
     AnnotationStoreError,
 )
 from .annotations import _name, _object
+from .attachment_types import MAX_BLOB_BYTES, AttachmentLimits, AttachmentQuotaError, integer, sha256
 from .errors import InputError
 
 COMMAND_FORMAT = "corpusledger.event-command.v1"
@@ -50,6 +60,7 @@ ERROR_STATUS = {
     "conflict": 409,
     "uncertain": 409,
     "execution_disabled": 409,
+    "attachments_disabled": 409,
     "too_large": 413,
     "unavailable": 503,
     "internal_error": 500,
@@ -64,7 +75,52 @@ _ARGUMENTS = {
     "status": {"operation_id"},
     "operations": {"after_operation_id", "limit"},
     "operation_history": {"operation_id", "after_version", "limit"},
+    "attachment_attach": {
+        "event_id",
+        "name",
+        "data",
+        "media_type",
+        "expected_revision",
+        "expected_digest",
+        "command_id",
+    },
+    "attachment_detach": {"event_id", "name", "expected_revision", "expected_digest", "command_id"},
+    "attachment_get": {"event_id", "name", "revision", "expected_digest"},
+    "attachment_list": {"event_id", "revision", "expected_digest"},
+    "attachment_snapshot_export": {"event_id", "revision", "expected_digest"},
+    "attachment_snapshot_import": {
+        "snapshot",
+        "command_id",
+        "expected_revision",
+        "expected_digest",
+        "expected_snapshot_digest",
+    },
 }
+ATTACHMENT_DATA_FORMAT = "corpusledger.attachment-data.v1"
+ATTACHMENT_LIST_FORMAT = "corpusledger.attachment-list.v1"
+
+
+def _decode_attachment_data(value: Any, *, maximum: int = MAX_BLOB_BYTES) -> bytes:
+    """Admit the encoded payload before allocating decoded, opaque bytes."""
+    if not isinstance(value, str):
+        raise InputError("attachment data must be base64 text")
+    if len(value) > 4 * ((maximum + 2) // 3):
+        raise AttachmentQuotaError("attachment data exceeds its encoded limit")
+    try:
+        data = base64.b64decode(value, validate=True)
+    except (ValueError, binascii.Error):
+        raise InputError("attachment data must be canonical standard base64") from None
+    if len(data) > maximum:
+        raise AttachmentQuotaError("attachment data exceeds its decoded byte limit")
+    if base64.b64encode(data).decode("ascii") != value:
+        raise InputError("attachment data must use canonical base64")
+    return data
+
+
+def _encode_attachment_data(data: bytes) -> str:
+    if type(data) is not bytes or len(data) > MAX_BLOB_BYTES:
+        raise InputError("attachment data must be bounded bytes")
+    return base64.b64encode(data).decode("ascii")
 
 
 class AnnotationServiceError(InputError):
@@ -258,7 +314,7 @@ class _Handler(socketserver.BaseRequestHandler):
         except _Rejected as exc:
             status = ERROR_STATUS[exc.code]
             body = encode_wire(_envelope(command, error=exc.code))
-        except (AnnotationConflictError, AnnotationExecutionConflict):
+        except (AnnotationConflictError, AnnotationExecutionConflict, AttachmentConflictError):
             status, body = 409, encode_wire(_envelope(command, error="conflict"))
         except AnnotationExecutionUncertain:
             status, body = 409, encode_wire(_envelope(command, error="uncertain"))
@@ -266,6 +322,8 @@ class _Handler(socketserver.BaseRequestHandler):
             status, body = 404, encode_wire(_envelope(command, error="not_found"))
         except (RemoteAnnotationError, sqlite3.Error):
             status, body = 503, encode_wire(_envelope(command, error="unavailable"))
+        except AttachmentQuotaError:
+            status, body = 413, encode_wire(_envelope(command, error="too_large"))
         except AnnotationStoreError as exc:
             code = "unavailable" if isinstance(exc.__cause__, (sqlite3.Error, OSError)) else "request_invalid"
             status, body = ERROR_STATUS[code], encode_wire(_envelope(command, error=code))
@@ -306,12 +364,14 @@ class AnnotationServer(socketserver.TCPServer):
         request_timeout: float,
         max_connections: int,
         max_wire_bytes: int,
+        attachment_limits: AttachmentLimits,
     ) -> None:
         self.store_path = store_path
         self.pipelines = MappingProxyType(dict(pipelines))
         self.token_env = token_env
         self.request_timeout = request_timeout
         self.max_wire_bytes = max_wire_bytes
+        self.attachment_limits = attachment_limits
         self._admission = threading.BoundedSemaphore(max_connections)
         self._active_lock = threading.Lock()
         self._active: dict[socket.socket, threading.Thread] = {}
@@ -387,6 +447,15 @@ class AnnotationServer(socketserver.TCPServer):
 
     def dispatch(self, command: str, arguments: dict[str, Any]) -> Any:
         with AnnotationStore(self.store_path, create=False) as store:
+            if command.startswith("attachment_"):
+                try:
+                    return self._attachment_dispatch(store, command, arguments)
+                except (AnnotationConflictError, AttachmentConflictError):
+                    raise
+                except AnnotationStoreError:
+                    # The attachment manager uses InputError for invalid input;
+                    # stored descriptor/BLOB/receipt failures are unavailable data.
+                    raise _Rejected("unavailable") from None
             if command == "create":
                 event = AnnotationEvent.from_dict(arguments["event"])
                 # Ensure the complete response fits before publishing a create.
@@ -430,6 +499,60 @@ class AnnotationServer(socketserver.TCPServer):
             self._binding_fits(binding)
             return executor.resume(**{**arguments, "pipelines": selected}).to_dict()
 
+    def _attachment_dispatch(self, store: AnnotationStore, command: str, arguments: dict[str, Any]) -> Any:
+        if not store.attachments_enabled:
+            raise _Rejected("attachments_disabled")
+        manager = AnnotationAttachments(store, self.attachment_limits)
+        if command in ("attachment_attach", "attachment_detach"):
+            fields = dict(arguments)
+            if command == "attachment_attach":
+                fields["data"] = _decode_attachment_data(fields["data"], maximum=self.attachment_limits.max_blob_bytes)
+                preview = manager.preview_attach(**fields)
+                self._attachment_fits(command, preview)
+                return manager.attach(**fields).to_dict()
+            preview = manager.preview_detach(**fields)
+            self._attachment_fits(command, preview)
+            return manager.detach(**fields).to_dict()
+        if command == "attachment_snapshot_import":
+            snapshot = AnnotationAttachmentSnapshot.from_dict(arguments["snapshot"])
+            sha256(arguments["expected_snapshot_digest"])
+            if snapshot.digest != arguments["expected_snapshot_digest"]:
+                raise _Rejected("conflict")
+            options = {
+                "command_id": arguments["command_id"],
+                "expected_revision": arguments["expected_revision"],
+                "expected_digest": arguments["expected_digest"],
+                "limits": self.attachment_limits,
+            }
+            preview = preview_import_snapshot(store, snapshot, **options)
+            self._attachment_fits(command, preview)
+            return import_snapshot(store, snapshot, **options).to_dict()
+        integer(arguments["revision"], "pinned revision", 1, 2**63 - 2)
+        sha256(arguments["expected_digest"])
+        selected = store.get(arguments["event_id"], arguments["revision"])
+        if selected.digest != arguments["expected_digest"]:
+            raise _Rejected("conflict")
+        if command == "attachment_snapshot_export":
+            return export_snapshot(store, selected.event_id, selected.revision, limits=self.attachment_limits).to_dict()
+        pin = {"event_id": selected.event_id, "revision": selected.revision, "digest": selected.digest}
+        items = manager.list(selected.event_id, revision=selected.revision)
+        if command == "attachment_list":
+            return {"format": ATTACHMENT_LIST_FORMAT, **pin, "attachments": [item.to_dict() for item in items]}
+        data = manager.read(selected.event_id, arguments["name"], revision=selected.revision)
+        item = next(item for item in items if item.name == arguments["name"])
+        return {
+            "format": ATTACHMENT_DATA_FORMAT,
+            **pin,
+            "attachment": item.to_dict(),
+            "data": _encode_attachment_data(data),
+        }
+
+    def _attachment_fits(self, command: str, preview: AnnotationRevision) -> None:
+        try:
+            encode_wire(_envelope(command, result=preview.to_dict()), limit=self.max_wire_bytes)
+        except InputError:
+            raise _Rejected("too_large") from None
+
     def _binding_fits(self, binding: dict[str, Any]) -> None:
         # All 128 fixed-format completion records, counters and response/state
         # envelope fit in this headroom, independently of annotation/text sizes.
@@ -450,11 +573,13 @@ def create_annotation_server(
     host: str = "127.0.0.1",
     port: int = 0,
     enable_execution_journal: bool = False,
+    enable_attachments: bool = False,
+    attachment_limits: AttachmentLimits | None = None,
     request_timeout: float = 30,
     max_connections: int = 8,
     max_wire_bytes: int = MAX_WIRE_BYTES,
 ) -> AnnotationServer:
-    """Create a local server; the journal migration requires explicit opt-in."""
+    """Create a local server; journal and attachment migrations require separate opt-ins."""
     _credential_name(token_env)
     _token(token_env)
     timeout = _timeout(request_timeout)
@@ -474,6 +599,11 @@ def create_annotation_server(
         raise AnnotationServiceError("wire byte limit must be between 1024 and 16 MiB")
     if type(enable_execution_journal) is not bool:
         raise AnnotationServiceError("execution journal opt-in must be a boolean")
+    if type(enable_attachments) is not bool:
+        raise AnnotationServiceError("attachment opt-in must be a boolean")
+    if attachment_limits is not None and not isinstance(attachment_limits, AttachmentLimits):
+        raise AnnotationServiceError("attachment limits must be an AttachmentLimits value")
+    limits = AttachmentLimits(**attachment_limits.to_dict()) if attachment_limits is not None else AttachmentLimits()
     if not isinstance(pipelines, Mapping) or len(pipelines) > 128:
         raise AnnotationServiceError("registry must contain at most 128 pipelines")
     registry = dict(pipelines)
@@ -491,11 +621,14 @@ def create_annotation_server(
         request_timeout=timeout,
         max_connections=max_connections,
         max_wire_bytes=max_wire_bytes,
+        attachment_limits=limits,
     )
     try:
         with AnnotationStore(path) as store:
             if enable_execution_journal:
                 store.enable_execution_journal()
+            if enable_attachments:
+                store.enable_attachments()
     except Exception:
         server.server_close()
         raise
@@ -534,6 +667,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=0)
     parser.add_argument("--enable-execution-journal", action="store_true")
+    parser.add_argument("--enable-attachments", action="store_true")
+    for name, default in AttachmentLimits().to_dict().items():
+        parser.add_argument("--attachment-" + name.replace("_", "-"), type=int, default=default)
     args = parser.parse_args(argv)
     try:
         config = args.config.resolve()
@@ -550,6 +686,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             enable_execution_journal=args.enable_execution_journal,
+            enable_attachments=args.enable_attachments,
+            attachment_limits=AttachmentLimits(
+                **{name: getattr(args, "attachment_" + name) for name in AttachmentLimits().to_dict()}
+            ),
         ) as server:
             print(server.endpoint, flush=True)
             with suppress(KeyboardInterrupt):

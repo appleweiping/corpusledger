@@ -5,6 +5,8 @@ from ._annotation_journal import (
     AnnotationExecutionError,
     AnnotationExecutionUncertain,
 )
+from .annotation_attachment_snapshot import AnnotationAttachmentSnapshot, export_snapshot, import_snapshot
+from .annotation_attachments import AnnotationAttachments
 from .annotation_execution import AnnotationExecutor, AnnotationOperation, RemoteAnnotationPipeline
 from .annotation_pipeline import (
     AnnotationPipeline,
@@ -36,6 +38,7 @@ from .annotations import (
     codepoint_to_utf16,
     utf16_to_codepoint,
 )
+from .attachment_types import AttachmentError, AttachmentLimits, AttachmentManifest
 from .canonical import CANONICAL_VERSION, CanonicalPolicy, canonical_bytes, canonical_json, canonicalize
 from .catalog import SnapshotCatalog, SnapshotRef
 from .diff import CorpusDiff, compare
@@ -83,6 +86,8 @@ __all__ = [
     "READER_ENTRY_POINT_GROUP",
     "SIGNATURE_FORMAT",
     "STORE_FORMAT",
+    "AnnotationAttachmentSnapshot",
+    "AnnotationAttachments",
     "AnnotationConflictError",
     "AnnotationDocument",
     "AnnotationEvent",
@@ -107,6 +112,9 @@ __all__ = [
     "AnnotationStoreError",
     "AnnotationStoreVerification",
     "AnnotationType",
+    "AttachmentError",
+    "AttachmentLimits",
+    "AttachmentManifest",
     "BundleReport",
     "BundleVerification",
     "CanonicalPolicy",
@@ -152,8 +160,10 @@ __all__ = [
     "compare_json_schemas",
     "create_server",
     "drop_fields",
+    "export_snapshot",
     "external_sort_jsonl",
     "extract_bundle",
+    "import_snapshot",
     "iter_corpus",
     "load_pipeline_plan",
     "load_reader_adapter",

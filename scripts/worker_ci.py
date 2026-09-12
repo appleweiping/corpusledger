@@ -12,6 +12,29 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
+ATTACHMENT_ORACLE = "examples/annotation_attachment_polyglot.py"
+ATTACHMENT_SOURCES = {
+    ATTACHMENT_ORACLE,
+    "interop/verify_workers.py",
+    "interop/go/attachment_example/main.go",
+    "interop/go/go.mod",
+    "interop/java/AttachmentExample.java",
+    "interop/java/dependencies.json",
+}
+ATTACHMENT_CHECKS = (
+    "passed",
+    "all_256_octets",
+    "nul_included",
+    "history_retained_after_detach",
+    "idempotent_original_pins",
+    "wire_16mib_header_rejected",
+    "blob_4mib_accepted",
+    "blob_4mib_plus_one_rejected_without_revision",
+    "snapshot_export_import_verified",
+    "snapshot_12mib_rejected_without_revision",
+    "sources_unchanged_during_run",
+    "imported_runtime_matches_sources",
+)
 
 
 def invoke(script: str, *arguments: str) -> dict[str, Any]:
@@ -40,10 +63,26 @@ def sources() -> dict[str, str]:
         *ROOT.glob("interop/**/*.java"),
         *ROOT.glob("interop/**/*.json"),
         ROOT / "interop/go/go.mod",
+        ROOT / ATTACHMENT_ORACLE,
         ROOT / ".github/workflows/ci.yml",
         Path(__file__).resolve(),
     ]
     return {path.relative_to(ROOT).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest() for path in sorted(paths)}
+
+
+def attachment_evidence(value: dict[str, Any], inventory: dict[str, str]) -> None:
+    """Require the actual native oracle's checks and source binding, not a skip."""
+    if value.get("format") != "corpusledger.attachment-polyglot-oracle.v1" or any(
+        value.get(name) is not True for name in ATTACHMENT_CHECKS
+    ):
+        raise ValueError("attachment verifier did not confirm every required contract")
+    expected = {
+        name: digest
+        for name, digest in inventory.items()
+        if name.startswith("src/corpusledger/") or name in ATTACHMENT_SOURCES
+    }
+    if not expected.keys() >= ATTACHMENT_SOURCES or value.get("source_sha256") != expected:
+        raise ValueError("attachment verifier did not bind the expected source inventory")
 
 
 def main() -> None:
@@ -75,6 +114,8 @@ def main() -> None:
     service = invoke("interop/verify_execution.py", "--build-dir", str(build_dir))
     if worker.get("passed") is not True or service.get("passed") is not True:
         raise ValueError("cross-language verifier did not confirm success")
+    attachments = invoke(ATTACHMENT_ORACLE, "--build-dir", str(build_dir))
+    attachment_evidence(attachments, before)
     if before != sources():
         raise ValueError("source files changed during cross-language verification")
     report = {
@@ -84,6 +125,7 @@ def main() -> None:
         "build": build,
         "worker_contract": worker,
         "event_service_contract": service,
+        "attachment_contract": attachments,
         "source_sha256": before,
     }
     (artifacts / "evidence.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")

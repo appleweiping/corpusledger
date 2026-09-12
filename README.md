@@ -33,6 +33,11 @@ reservations and atomic multi-document publication. See the
 The [real-text service benchmark](docs/annotation-service-benchmark.md) records
 independent correctness checks and explicitly separates them from NLP accuracy
 or production-scale claims.
+Versioned [binary attachments](docs/annotation-attachments.md) add same-database
+content deduplication, optimistic attachment edits and retry receipts, pinned
+reads, and bounded single-event snapshot import/export. The
+[local CLI](docs/annotation-attachment-cli.md) uses explicit schema upgrades and
+new output paths; detach preserves historical bytes, not secure erasure.
 
 ## Why content manifests?
 
