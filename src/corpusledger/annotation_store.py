@@ -489,14 +489,23 @@ class AnnotationStore:
 
     @contextmanager
     def _transaction(self, *, write: bool = False) -> Iterator[None]:
+        """Own one non-nested transaction; never clean up a caller's scope."""
         self._ensure_open()
+        acquired = False
         try:
+            if self._connection.in_transaction:
+                raise AnnotationStoreError("annotation store transactions cannot be nested")
             self._connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
+            acquired = True
             yield
             self._connection.execute("COMMIT")
         except BaseException as exc:
-            if self._connection.in_transaction:
-                self._connection.execute("ROLLBACK")
+            if acquired:
+                try:
+                    if self._connection.in_transaction:
+                        self._connection.execute("ROLLBACK")
+                except sqlite3.Error as rollback_error:
+                    raise AnnotationStoreError("annotation store transaction rollback failed") from rollback_error
             if isinstance(exc, sqlite3.Error):
                 raise AnnotationStoreError("annotation store transaction failed") from exc
             raise
