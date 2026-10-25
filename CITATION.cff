@@ -1,12 +1,10 @@
 cff-version: 1.2.0
-message: "If CorpusLedger supports your work, cite the software using this metadata."
-title: CorpusLedger
+message: "If you use corpusledger in your work, please cite it as below."
+title: corpusledger
 type: software
 authors:
-  - family-names: Wei
-    given-names: Ping
+  - family-names: Yan
+    given-names: Weiping
 repository-code: "https://github.com/appleweiping/corpusledger"
-url: "https://github.com/appleweiping/corpusledger"
 license: MIT
-version: 0.2.0
-date-released: 2026-08-31
+version: 0.3.0

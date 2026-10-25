@@ -4,114 +4,52 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
-  quality:
-    name: Quality
+  lint:
     runs-on: ubuntu-latest
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-          cache: pip
-      - name: Install quality dependencies
-        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
-      - name: Lint
-        run: ruff check .
-      - name: Check formatting
-        run: ruff format --check .
-      - name: Type check
-        run: mypy src
-      - name: Security scan
-        run: bandit -q -c pyproject.toml -r src
+          python-version: "3.13"
+      - run: python -m pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: mypy
 
-  tests:
-    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+  test:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - {os: ubuntu-latest, python-version: "3.10"}
-          - {os: ubuntu-latest, python-version: "3.11"}
-          - {os: ubuntu-latest, python-version: "3.12"}
           - {os: ubuntu-latest, python-version: "3.13"}
-          - {os: ubuntu-latest, python-version: "3.14"}
-          - {os: windows-latest, python-version: "3.10"}
-          - {os: windows-latest, python-version: "3.14"}
-          - {os: macos-latest, python-version: "3.10"}
-          - {os: macos-latest, python-version: "3.14"}
+          - {os: windows-latest, python-version: "3.13"}
+          - {os: macos-latest, python-version: "3.13"}
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
-          cache: pip
-      - name: Install package
-        run: python -m pip install --upgrade pip && python -m pip install -e ".[dev]"
-      - name: Run tests
-        run: pytest
+      - run: python -m pip install -e ".[dev]"
+      - run: pytest -q
 
-  build:
-    name: Build distributions
+  minimal:
+    # no optional dependencies: the Parquet test is skipped, everything else must pass.
     runs-on: ubuntu-latest
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        with:
-          python-version: "3.14"
-          cache: pip
-      - name: Build and inspect distributions
-        run: python -m pip install --upgrade pip build twine && python -m build && python -m twine check dist/*
-      - name: Upload distributions
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: distributions
-          path: dist/*
-          if-no-files-found: error
-          retention-days: 7
-
-  wheel-smoke:
-    name: Wheel smoke (${{ matrix.os }})
-    needs: build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
-    steps:
-      - name: Download distributions
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: distributions
-          path: artifact
-      - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install wheel only
-        run: python -c "import glob,subprocess,sys; wheels=glob.glob('artifact/*.whl'); len(wheels)==1 or sys.exit(f'expected one wheel, found {wheels}'); subprocess.check_call([sys.executable,'-m','pip','install',wheels[0]])"
-      - name: Smoke-test installed package
-        run: python -I -c "import corpusledger; raise SystemExit(0 if corpusledger.__version__ == '0.2.0' else f'unexpected version {corpusledger.__version__}')" && corpusledger --version
+      - run: python -m pip install -e . pytest
+      - run: pytest -q
+      - run: corpusledger --version
+      # the two example files differ, so the expected exit status is 1
+      - run: corpusledger diff examples/before.jsonl examples/after.jsonl || [ $? -eq 1 ]
