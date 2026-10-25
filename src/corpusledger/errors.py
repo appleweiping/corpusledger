@@ -1,29 +1,17 @@
-"""Public exception hierarchy for CorpusLedger."""
+"""Errors that the command line reports as a one-line message with exit status 2."""
 
 
 class CorpusLedgerError(Exception):
-    """Base class for expected, user-facing CorpusLedger errors."""
+    """Base class for expected, user-facing errors."""
 
 
 class CanonicalizationError(CorpusLedgerError):
-    """Raised when a value cannot be represented canonically."""
+    """A value cannot be represented as canonical JSON."""
 
 
 class InputError(CorpusLedgerError):
-    """Raised when corpus input is malformed or ambiguous."""
+    """A dataset file is missing, malformed or lacks the fields needed to match records."""
 
 
-class DuplicateIdError(InputError):
-    """Raised when two records use the same logical identifier."""
-
-
-class ManifestError(CorpusLedgerError):
-    """Raised when a manifest is invalid or incompatible."""
-
-
-class SignatureError(CorpusLedgerError):
-    """Raised when a signature artifact or key cannot be processed."""
-
-
-class SignatureVerificationError(SignatureError):
-    """Raised when cryptographic authenticity cannot be established."""
+class SnapshotError(CorpusLedgerError):
+    """A snapshot file is malformed or incompatible."""

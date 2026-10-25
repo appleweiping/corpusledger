@@ -1,264 +1,151 @@
-"""Command-line interface for CorpusLedger."""
+"""``corpusledger snapshot`` and ``corpusledger diff``."""
 
 from __future__ import annotations
 
 import argparse
-import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
 
-from .canonical import CanonicalPolicy
+from . import __version__
 from .diff import compare
-from .errors import (
-    CorpusLedgerError,
-    InputError,
-    ManifestError,
-    SignatureError,
-    SignatureVerificationError,
-)
-from .manifest import Manifest, build_manifest
-from .privacy import PrivacyConfig
-from .readers import ReaderAdapter, load_reader_adapter
-from .reporting import render
-from .signing import SignatureEnvelope, sign_manifest, verify_manifest_signature
+from .errors import CorpusLedgerError, InputError, SnapshotError
+from .report import render_json, render_text
+from .snapshot import Match, Snapshot, build_snapshot, is_snapshot
 
 
-def _parser() -> argparse.ArgumentParser:
+def _names(value: str) -> tuple[str, ...]:
+    names = tuple(part.strip() for part in value.split(",") if part.strip())
+    if not names:
+        raise argparse.ArgumentTypeError("expected one or more comma-separated field names")
+    return names
+
+
+def _matching_options(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--id", metavar="FIELD", help="match records by this ID field")
+    group.add_argument(
+        "--key",
+        metavar="FIELDS",
+        type=_names,
+        help="match records by a hash of these fields, e.g. instruction,input",
+    )
+    group.add_argument(
+        "--content", action="store_true", help="match records by their whole content"
+    )
+    parser.add_argument(
+        "--ignore",
+        metavar="FIELDS",
+        type=_names,
+        default=(),
+        help="leave these fields out of every hash, e.g. text or /meta/timestamp",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="corpusledger",
-        description="Reproducible manifests and diffs for JSON NLP corpora",
+        description="See what changed between two versions of a dataset.",
     )
-    parser.add_argument("--version", action="version", version="%(prog)s 0.2.0")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-    snapshot = subparsers.add_parser("snapshot", help="create a corpus manifest")
-    snapshot.add_argument("input")
-    snapshot.add_argument("output")
-    snapshot.add_argument("--id-field", default="id")
-    snapshot.add_argument("--algorithm", choices=("sha256", "blake2b"), default="sha256")
-    snapshot.add_argument("--sort-lists", action="store_true", help="treat lists as set-like (use with care)")
-    snapshot.add_argument(
-        "--reader",
-        help="explicit corpusledger.readers entry point (third-party code is loaded only when named)",
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    snap = commands.add_parser(
+        "snapshot",
+        help="save record IDs and hashes so a later version can be diffed against them",
     )
+    snap.add_argument("data", help="file or directory")
+    snap.add_argument("-o", "--output", required=True, help="snapshot file to write (.json)")
+    _matching_options(snap)
 
-    difference = subparsers.add_parser("diff", help="compare two manifests")
-    difference.add_argument("before")
-    difference.add_argument("after")
-    difference.add_argument("--format", choices=("json", "markdown"), default="markdown")
-    difference.add_argument("--output")
-
-    verify = subparsers.add_parser("verify", help="rebuild and verify a manifest")
-    verify.add_argument("manifest")
-    verify.add_argument("--input", help="override the source path recorded in the manifest")
-    verify.add_argument("--reader", help="override or confirm the recorded reader entry point")
-
-    sign = subparsers.add_parser("sign", help="create a detached Ed25519 signature")
-    sign.add_argument("manifest")
-    sign.add_argument("--private-key", required=True, help="Ed25519 PEM private key path")
-    sign.add_argument("--output", help="signature path (default: MANIFEST.sig)")
-    sign.add_argument(
-        "--password-env",
-        help="environment variable containing the PEM password; the value is never printed",
+    diff = commands.add_parser(
+        "diff",
+        help="compare two versions (data files, directories or snapshots)",
+        description="Compare two versions of a dataset. Each side may be a data file, a "
+        "directory or a snapshot. Exit status: 0 no differences, 1 differences, 2 error.",
     )
-
-    verify_signature = subparsers.add_parser(
-        "verify-signature",
-        help="authenticate exact manifest bytes against a trusted Ed25519 public key",
+    diff.add_argument("before")
+    diff.add_argument("after")
+    _matching_options(diff)
+    diff.add_argument("--json", action="store_true", help="print the full result as JSON")
+    diff.add_argument(
+        "--examples", type=int, default=3, help="examples per kind of change (default 3)"
     )
-    verify_signature.add_argument("manifest")
-    verify_signature.add_argument("signature")
-    verify_signature.add_argument("--public-key", required=True, help="trusted Ed25519 PEM public key path")
+    diff.add_argument("-o", "--output", help="write the report to a file instead of stdout")
     return parser
 
 
-def _write_report(text: str, destination: str | None) -> None:
-    if destination:
-        try:
-            Path(destination).write_text(text, encoding="utf-8")
-        except (OSError, UnicodeError) as exc:
-            raise InputError(f"cannot write report {destination}: {exc}") from exc
+def _requested(args: argparse.Namespace) -> Match | None:
+    if args.id:
+        return Match("id", (args.id,))
+    if args.key:
+        return Match("key", tuple(args.key))
+    if args.content:
+        return Match("content")
+    return None
+
+
+def _load_side(path: str, match: Match | None, ignore: tuple[str, ...]) -> Snapshot:
+    if is_snapshot(path):
+        snapshot = Snapshot.load(path)
+        if match is not None and snapshot.match != match:
+            raise SnapshotError(
+                f"{path} matches records by {snapshot.match.describe()}, "
+                f"not {match.describe()}; snapshot again with the same options"
+            )
+        if snapshot.ignore != ignore:
+            raise SnapshotError(
+                f"{path} was made with --ignore {','.join(snapshot.ignore) or '(nothing)'}; "
+                "use the same --ignore on both sides"
+            )
+        return snapshot
+    return build_snapshot(path, match, ignore=ignore, keep_rows=True)
+
+
+def _diff(args: argparse.Namespace) -> int:
+    match = _requested(args)
+    ignore = tuple(args.ignore)
+    reference = next((side for side in (args.before, args.after) if is_snapshot(side)), None)
+    if reference is not None:
+        stored = Snapshot.load(reference)
+        match = match or stored.match
+        if not args.ignore:
+            ignore = stored.ignore
+    before = _load_side(args.before, match, ignore)
+    after = _load_side(args.after, match or before.match, ignore)
+    result = compare(before, after)
+    text = render_json(result) if args.json else render_text(result, max(args.examples, 0))
+    if args.output:
+        Path(args.output).write_text(text, encoding="utf-8")
     else:
         sys.stdout.write(text)
+    return 1 if result.has_changes else 0
 
 
-def run(argv: list[str] | None = None) -> int:
-    """Execute the CLI and return a process status."""
-    args = _parser().parse_args(argv)
-    if args.command == "snapshot":
-        input_path = Path(args.input).resolve()
-        output_path = Path(args.output).resolve()
-        _require_distinct(
-            output_path,
-            input_path,
-            message="snapshot output must not overwrite the input corpus file",
-        )
-        if output_path.exists():
-            try:
-                Manifest.load(output_path)
-            except ManifestError as exc:
-                raise InputError("snapshot output already exists and is not a CorpusLedger manifest") from exc
-        policy = CanonicalPolicy(list_strategy="sort" if args.sort_lists else "preserve")
-        manifest = build_manifest(
-            input_path,
-            id_field=args.id_field,
-            algorithm=args.algorithm,
-            policy=policy,
-            exclude_paths=(output_path,),
-            reader=_reader(args.reader),
-        )
-        manifest.save(args.output)
-        print(f"wrote {len(manifest.records)} records to {args.output}")
-        return 0
-    if args.command == "diff":
-        if args.output:
-            output_path = Path(args.output).resolve()
-            _require_distinct(
-                output_path,
-                Path(args.before).resolve(),
-                Path(args.after).resolve(),
-                message="diff output must not overwrite an input manifest",
-            )
-        result = compare(Manifest.load(args.before), Manifest.load(args.after))
-        _write_report(render(result, args.format), args.output)
-        return 1 if result.has_changes else 0
-    if args.command == "sign":
-        manifest_path = Path(args.manifest).resolve()
-        private_key_path = Path(args.private_key).resolve()
-        output_path = Path(args.output or f"{args.manifest}.sig").resolve()
-        _require_distinct(
-            output_path,
-            manifest_path,
-            private_key_path,
-            message="signature output must not overwrite the manifest or private key",
-        )
-        Manifest.load(manifest_path)
-        if output_path.exists():
-            try:
-                SignatureEnvelope.load(output_path)
-            except SignatureError as exc:
-                raise InputError(
-                    "signature output already exists and is not a CorpusLedger signature envelope"
-                ) from exc
-        password = _password_from_environment(args.password_env)
-        envelope = sign_manifest(manifest_path, private_key_path, password=password)
-        envelope.save(output_path)
-        print(f"signed manifest with key {envelope.key_id}; wrote {output_path}")
-        return 0
-    if args.command == "verify-signature":
-        manifest_path = Path(args.manifest).resolve()
-        signature_path = Path(args.signature).resolve()
-        public_key_path = Path(args.public_key).resolve()
-        Manifest.load(manifest_path)
-        try:
-            envelope = verify_manifest_signature(manifest_path, signature_path, public_key_path)
-        except SignatureVerificationError as exc:
-            print(f"signature verification failed: {exc}", file=sys.stderr)
-            return 1
-        print(f"verified Ed25519 signature from key {envelope.key_id}")
-        return 0
-    existing = Manifest.load(args.manifest)
-    source = args.input or existing.source
-    _require_distinct(
-        Path(source).resolve(),
-        Path(args.manifest).resolve(),
-        message="verification source must not be the manifest itself",
+def _snapshot(args: argparse.Namespace) -> int:
+    source, output = Path(args.data).resolve(), Path(args.output).resolve()
+    if source == output:
+        raise InputError("the snapshot would overwrite the data")
+    if output.exists() and not is_snapshot(output):
+        raise InputError(f"{args.output} exists and is not a snapshot; refusing to overwrite it")
+    snapshot = build_snapshot(args.data, _requested(args), ignore=tuple(args.ignore))
+    snapshot.save(args.output)
+    note = f", {snapshot.duplicates} repeated IDs" if snapshot.duplicates else ""
+    print(
+        f"{len(snapshot.entries):,} records matched by {snapshot.match.describe()}{note}; "
+        f"wrote {args.output}"
     )
-    algorithm = existing.hash_metadata["algorithm"]
-    policy_data = existing.hash_metadata["policy"]
-    policy = CanonicalPolicy(**policy_data)
-    privacy = PrivacyConfig.from_dict(existing.privacy_metadata["config"])
-    reader = _verification_reader(existing, args.reader)
-    rebuilt = build_manifest(
-        source,
-        id_field=existing.id_field,
-        algorithm=algorithm,
-        policy=policy,
-        privacy=privacy,
-        exclude_paths=(args.manifest,),
-        reader=reader,
-    )
-    mismatches = _manifest_mismatches(existing, rebuilt)
-    if not mismatches:
-        print(f"verified {len(rebuilt.records)} records")
-        return 0
-    print(f"verification failed: {', '.join(mismatches)} differ", file=sys.stderr)
-    return 1
+    return 0
 
 
-def _manifest_mismatches(existing: Manifest, rebuilt: Manifest) -> list[str]:
-    """Name every derived manifest section that no longer matches the source."""
-    fields = (
-        "format",
-        "id_field",
-        "hash_metadata",
-        "privacy_metadata",
-        "corpus_hash",
-        "order_hash",
-        "files",
-        "records",
-        "schema",
-        "privacy_findings",
-        "reader_metadata",
-    )
-    return [name for name in fields if getattr(existing, name) != getattr(rebuilt, name)]
-
-
-def _reader(name: str | None) -> ReaderAdapter | None:
-    return load_reader_adapter(name) if name is not None else None
-
-
-def _verification_reader(manifest: Manifest, requested: str | None) -> ReaderAdapter | None:
-    recorded = manifest.reader_metadata
-    if recorded is None:
-        if requested is not None:
-            raise InputError("manifest does not record a third-party reader adapter")
-        return None
-    if requested is not None and requested != recorded["name"]:
-        raise InputError(f"manifest requires reader {recorded['name']!r}, not requested reader {requested!r}")
-    reader = load_reader_adapter(recorded["name"])
-    if reader.version != recorded["version"]:
-        raise InputError(
-            f"manifest requires reader {reader.name!r} version {recorded['version']!r}; "
-            f"installed version is {reader.version!r}"
-        )
-    return reader
-
-
-def _require_distinct(destination: Path, *protected: Path, message: str) -> None:
-    for existing in protected:
-        if destination == existing:
-            raise InputError(message)
-        try:
-            aliases_existing_file = destination.exists() and existing.exists() and destination.samefile(existing)
-        except OSError:
-            aliases_existing_file = False
-        if aliases_existing_file:
-            raise InputError(message)
-
-
-def _password_from_environment(name: str | None) -> bytes | None:
-    if name is None:
-        return None
-    if (
-        not name
-        or name != name.strip()
-        or "=" in name
-        or any(ord(character) < 32 or ord(character) == 127 or 0xD800 <= ord(character) <= 0xDFFF for character in name)
-    ):
-        raise InputError("password environment variable name is invalid")
-    value = os.environ.get(name)
-    if value is None:
-        raise InputError(f"password environment variable {name!r} is not set")
+def main(argv: Sequence[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     try:
-        return value.encode("utf-8")
-    except UnicodeError as exc:
-        raise InputError(f"password environment variable {name!r} is not valid UTF-8 text") from exc
-
-
-def main() -> None:
-    """Console-script entry point with concise expected-error handling."""
-    try:
-        raise SystemExit(run())
+        return _snapshot(args) if args.command == "snapshot" else _diff(args)
     except CorpusLedgerError as exc:
         print(f"corpusledger: {exc}", file=sys.stderr)
-        raise SystemExit(2) from exc
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

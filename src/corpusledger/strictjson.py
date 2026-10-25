@@ -45,4 +45,6 @@ def bounded_int(value: str) -> int:
     try:
         return int(value)
     except ValueError as exc:
-        raise StrictJsonError("JSON integer cannot be decoded under the active Python limit") from exc
+        raise StrictJsonError(
+            "JSON integer cannot be decoded under the active Python limit"
+        ) from exc

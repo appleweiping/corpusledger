@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 import unicodedata
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -41,22 +42,35 @@ class CanonicalPolicy:
         }
 
 
+_SURROGATE = re.compile(r"[\ud800-\udfff]")
+
+
 def _normalize_string(value: str, policy: CanonicalPolicy, *, path: str) -> str:
+    if _SURROGATE.search(value) is None:  # the common case: nothing to repair
+        if policy.unicode_form == "none":
+            return value
+        return unicodedata.normalize(policy.unicode_form, value)
     scalars: list[str] = []
     index = 0
     while index < len(value):
         code_point = ord(value[index])
         if 0xD800 <= code_point <= 0xDBFF:
             if index + 1 >= len(value):
-                raise CanonicalizationError(f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value")
+                raise CanonicalizationError(
+                    f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value"
+                )
             low = ord(value[index + 1])
             if not 0xDC00 <= low <= 0xDFFF:
-                raise CanonicalizationError(f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value")
+                raise CanonicalizationError(
+                    f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value"
+                )
             scalars.append(chr(0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00)))
             index += 2
             continue
         if 0xDC00 <= code_point <= 0xDFFF:
-            raise CanonicalizationError(f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value")
+            raise CanonicalizationError(
+                f"{path}: unpaired UTF-16 surrogate is not a valid Unicode scalar value"
+            )
         scalars.append(value[index])
         index += 1
     value = "".join(scalars)
@@ -76,7 +90,9 @@ def canonicalize(value: Any, policy: CanonicalPolicy | None = None, *, path: str
         return value
     if isinstance(value, int):
         if abs(value) >= _INTEGER_LIMIT:
-            raise CanonicalizationError(f"{path}: integer exceeds the {MAX_INTEGER_DIGITS}-digit limit")
+            raise CanonicalizationError(
+                f"{path}: integer exceeds the {MAX_INTEGER_DIGITS}-digit limit"
+            )
         return value
     if isinstance(value, str):
         return _normalize_string(value, policy, path=path)
@@ -91,11 +107,15 @@ def canonicalize(value: Any, policy: CanonicalPolicy | None = None, *, path: str
                 raise CanonicalizationError(f"{path}: mapping key {key!r} is not a string")
             normalized_key = _normalize_string(key, policy, path=f"{path} (object key)")
             if normalized_key in normalized:
-                raise CanonicalizationError(f"{path}: keys collide after Unicode normalization: {key!r}")
+                raise CanonicalizationError(
+                    f"{path}: keys collide after Unicode normalization: {key!r}"
+                )
             normalized[normalized_key] = canonicalize(item, policy, path=f"{path}.{normalized_key}")
         return {key: normalized[key] for key in sorted(normalized)}
     if isinstance(value, list):
-        normalized_items = [canonicalize(item, policy, path=f"{path}[{i}]") for i, item in enumerate(value)]
+        normalized_items = [
+            canonicalize(item, policy, path=f"{path}[{i}]") for i, item in enumerate(value)
+        ]
         if policy.list_strategy == "sort":
             normalized_items.sort(key=lambda item: canonical_json(item, policy))
         return normalized_items
@@ -108,7 +128,9 @@ def canonical_json(value: Any, policy: CanonicalPolicy | None = None) -> str:
 
     policy = policy or CanonicalPolicy()
     normalized = canonicalize(value, policy)
-    return json.dumps(normalized, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True)
+    return json.dumps(
+        normalized, ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True
+    )
 
 
 def canonical_bytes(value: Any, policy: CanonicalPolicy | None = None) -> bytes:
