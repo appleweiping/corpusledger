@@ -1,47 +1,24 @@
 # Changelog
 
-All notable changes follow the principles of Keep a Changelog.
+## 0.3.0 (unreleased)
 
-## [Unreleased]
+Reworked into a diff tool for dataset versions.
 
-## [0.2.0] - 2026-08-31
+- `corpusledger diff OLD NEW` works directly on data files (JSONL, JSON, CSV, Parquet, or a
+  directory of them) as well as on saved snapshots, and prints a summary: unchanged, changed,
+  removed and added records, which fields changed, schema changes and a few examples.
+  `--json` gives the full result for CI; the exit status is 1 when anything differs.
+- `--key instruction,input` matches records by a hash of chosen fields for datasets without an
+  ID column; records whose key fields were edited but whose other fields are identical are
+  reported as edits, not as a removal plus an addition. `--ignore` leaves fields out.
+- Snapshots are JSON with one record per line, so they can be committed and diffed in git.
+- Removed the privacy scanner, the reader plugin system and Ed25519 signing. Version 0.2 is
+  still available under the `v0.2.0` tag.
 
-### Added
+## 0.2.0 (2026-08-31)
 
-- Incremental canonical sequence hashing and schema aggregation, with explicit memory lower bounds and JSON-array and
-  sorted-list compatibility limits.
-- An injectable typed reader protocol plus explicitly loaded `corpusledger.readers` entry points; strict adapter
-  name/version metadata is persisted without changing old version-1 manifests.
-- Optional detached Ed25519 signing, encrypted PEM password support through an environment variable, strict signature
-  envelopes, trusted-public-key verification, and tamper/key-mismatch CLI behavior.
-- Property-based canonicalization and manifest roundtrip tests, legacy-hash compatibility tests, streaming boundary
-  tests, adapter contract tests, and signature tamper tests.
-- A deterministic 100,000-record generator and a checked end-to-end throughput/memory benchmark.
+Streaming JSONL snapshots, reader plugins and optional Ed25519 signatures.
 
-### Changed
+## 0.1.0 (2026-08-31)
 
-- Default JSONL snapshots stream one raw record at a time, retaining only manifest-required indexes and aggregations.
-  Exact version-1 hashes are preserved for both algorithms and list policies.
-- CI covers Python 3.10-3.14 with packaged wheel smoke tests on Linux, Windows, and macOS.
-
-### Fixed
-
-- Reject output hard-link aliases, unpaired Unicode surrogates, overflowing binary64 values, and resource-exhausting
-  integers.
-- Validate reader identity and suffix metadata, and sanitize plugin discovery and Markdown report boundaries.
-
-## [0.1.0] - 2026-08-31
-
-### Added
-
-- Deterministic JSON/JSONL and directory snapshots.
-- Versioned record, file, corpus, and order fingerprints.
-- Conservative schema summaries and redacted privacy-risk hints.
-- Record, field, schema, privacy, and order-aware diffs.
-- JSON/Markdown reports and snapshot/diff/verify CLI commands.
-- Collision-free JSON Pointer field paths, with every derived manifest section verified.
-- Versioned privacy scanner configuration persisted alongside findings.
-
-### Fixed
-
-- Reject duplicate JSON keys, non-finite numbers, and Unicode-equivalent duplicate IDs.
+First version: content-hash manifests and record/field/schema diffs for JSON and JSONL.
